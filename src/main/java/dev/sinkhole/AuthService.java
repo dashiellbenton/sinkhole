@@ -16,9 +16,19 @@ public final class AuthService {
     private final Path cacheFile;
     private final HttpClient http = MinecraftAuth.createHttpClient();
     private JavaAuthManager manager;
+    /** Developer-only: skip Microsoft sign-in and join offline-mode servers under this name. */
+    private String offlineName;
 
     public AuthService(Path cacheFile) {
         this.cacheFile = cacheFile;
+    }
+
+    public void useOffline(String name) {
+        this.offlineName = name;
+    }
+
+    public boolean isOffline() {
+        return offlineName != null;
     }
 
     public boolean hasCachedLogin() {
@@ -27,6 +37,9 @@ public final class AuthService {
 
     /** Uses the cached login if there is one, otherwise prompts with a microsoft.com/link code. */
     public void login() throws Exception {
+        if (isOffline()) {
+            return;
+        }
         if (hasCachedLogin()) {
             try {
                 manager = JavaAuthManager.fromJson(http, new Gson().fromJson(Files.readString(cacheFile), JsonObject.class));
@@ -51,14 +64,23 @@ public final class AuthService {
     }
 
     public String javaName() {
+        if (isOffline()) {
+            return offlineName;
+        }
         return manager.getMinecraftProfile().getCached().getName();
     }
 
     public java.util.UUID javaUuid() {
+        if (isOffline()) {
+            return java.util.UUID.nameUUIDFromBytes(("OfflinePlayer:" + offlineName).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
         return manager.getMinecraftProfile().getCached().getId();
     }
 
     public String accessToken() throws IOException {
+        if (isOffline()) {
+            return null;
+        }
         String t = manager.getMinecraftToken().getUpToDate().getToken();
         save();
         return t;

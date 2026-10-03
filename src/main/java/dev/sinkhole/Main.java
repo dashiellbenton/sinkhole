@@ -13,6 +13,10 @@ public final class Main {
         boolean freshConfig = !Files.exists(CONFIG);
 
         AuthService auth = new AuthService(AUTH);
+        // Developer flag for testing against offline-mode servers: --offline <name>. Never signs in.
+        if (args.length >= 2 && args[0].equals("--offline")) {
+            auth.useOffline(args[1]);
+        }
         auth.login();
         System.out.println("[Sinkhole] Signed in as " + auth.javaName());
 

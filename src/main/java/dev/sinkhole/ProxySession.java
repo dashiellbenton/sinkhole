@@ -95,6 +95,25 @@ public final class ProxySession implements BedrockPacketHandler {
 
     // ---------------------------------------------------------------- Bedrock login handshake
 
+    private static final boolean DEBUG = System.getenv("SINKHOLE_DEBUG") != null;
+
+    private static void debug(String msg) {
+        if (DEBUG) {
+            System.out.println("[debug] " + msg);
+        }
+    }
+
+    @Override
+    public PacketSignal handlePacket(org.cloudburstmc.protocol.bedrock.packet.BedrockPacket packet) {
+        debug("bedrock -> proxy: " + packet.getClass().getSimpleName());
+        return PacketSignal.UNHANDLED;
+    }
+
+    @Override
+    public void onDisconnect(CharSequence reason) {
+        debug("bedrock disconnected: " + reason);
+    }
+
     @Override
     public PacketSignal handle(RequestNetworkSettingsPacket packet) {
         if (packet.getProtocolVersion() != Bedrock_v2193.CODEC.getProtocolVersion()) {
@@ -189,7 +208,9 @@ public final class ProxySession implements BedrockPacketHandler {
         javaStarted = true;
         try {
             GameProfile profile = new GameProfile(auth.javaUuid(), auth.javaName());
-            MinecraftProtocol protocol = new MinecraftProtocol(profile, auth.accessToken());
+            MinecraftProtocol protocol = auth.isOffline()
+                    ? new MinecraftProtocol(auth.javaName())
+                    : new MinecraftProtocol(profile, auth.accessToken());
             ClientSession session = ClientNetworkSessionFactory.factory()
                     .setRemoteSocketAddress(new java.net.InetSocketAddress(config.serverHost(), config.serverPort()))
                     .setProtocol(protocol)
