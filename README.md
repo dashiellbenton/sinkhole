@@ -28,9 +28,17 @@ This is a **foundation**, not a finished Geyser replacement. Implemented and com
 - Java client login with your account (MCProtocolLib 26.1), keep-alive handled by the library
 - Chat both directions, Java username substitution, disconnect messages, position sync, basic movement
 
-**Not implemented yet** (the bulk of Geyser): chunk/block translation (needs the Java<->Bedrock block
-palettes), entities, inventories/items, combat, effects, forms, skins, resource packs, and so on.
-Until chunk translation exists the Bedrock client will not show a world.
+- Java block state -> Bedrock runtime id mapping from GeyserMC's published mappings (all 32,366 Java 26.2
+  states resolve against the Bedrock 1.26.50 palette; checked at startup)
+- Chunk translation (blocks only) into Bedrock sub-chunks, bedrock item definitions in StartGame
+
+**Untested against a real Bedrock client** - the chunk encoder and join sequence are written to match
+Geyser's behaviour but have only been exercised with synthetic data. Expect to debug the first join.
+
+**Not implemented yet**: Java biome -> Bedrock biome mapping (every column is "plains"), block
+updates, block entities, entities, inventories/items/creative menu, crafting, biome/entity-identifier
+packets the client may require, combat, effects, forms, skins, resource packs, non-overworld dimensions.
+So even once a world loads it is not yet playable on a real server.
 
 ## About "Bedrock PvP / cooldown" and bans
 

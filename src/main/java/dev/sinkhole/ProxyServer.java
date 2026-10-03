@@ -23,13 +23,15 @@ public final class ProxyServer {
     private final AtomicReference<ProxySession> active = new AtomicReference<>();
     private final EventLoopGroup group = new NioEventLoopGroup();
     private Channel channel;
+    private ChunkTranslator chunks;
 
     public ProxyServer(SinkholeConfig config, AuthService auth) {
         this.config = config;
         this.auth = auth;
     }
 
-    public void start() throws InterruptedException {
+    public void start() throws Exception {
+        chunks = new ChunkTranslator(new BlockMapper());
         BedrockPong pong = new BedrockPong()
                 .edition("MCPE")
                 .motd("SinkholeMC")
@@ -49,7 +51,7 @@ public final class ProxyServer {
                 .childHandler(new BedrockServerInitializer() {
                     @Override
                     protected void initSession(BedrockServerSession session) {
-                        ProxySession proxy = new ProxySession(config, auth, session);
+                        ProxySession proxy = new ProxySession(config, auth, session, chunks);
                         // Single-user: refuse a second concurrent client.
                         if (!active.compareAndSet(null, proxy)) {
                             session.disconnect("SinkholeMC only supports one player at a time.");

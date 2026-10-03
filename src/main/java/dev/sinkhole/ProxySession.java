@@ -22,7 +22,10 @@ import org.cloudburstmc.protocol.bedrock.data.SpawnBiomeType;
 import org.cloudburstmc.protocol.bedrock.data.auth.CertificateChainPayload;
 import org.cloudburstmc.protocol.bedrock.data.auth.TokenPayload;
 import org.cloudburstmc.protocol.bedrock.packet.BedrockPacketHandler;
+import org.cloudburstmc.protocol.bedrock.packet.ChunkRadiusUpdatedPacket;
+import org.cloudburstmc.protocol.bedrock.packet.LevelChunkPacket;
 import org.cloudburstmc.protocol.bedrock.packet.LoginPacket;
+import org.cloudburstmc.protocol.bedrock.packet.NetworkChunkPublisherUpdatePacket;
 import org.cloudburstmc.protocol.bedrock.packet.MovePlayerPacket;
 import org.cloudburstmc.protocol.bedrock.packet.NetworkSettingsPacket;
 import org.cloudburstmc.protocol.bedrock.packet.PlayStatusPacket;
@@ -45,6 +48,7 @@ import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundLoginPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundPlayerChatPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundSystemChatPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundLevelChunkWithLightPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
@@ -64,6 +68,7 @@ public final class ProxySession implements BedrockPacketHandler {
     private final SinkholeConfig config;
     private final AuthService auth;
     private final BedrockServerSession bedrock;
+    private final ChunkTranslator chunks;
 
     private volatile ClientSession java;
     private NameRewriter names;
@@ -73,7 +78,8 @@ public final class ProxySession implements BedrockPacketHandler {
     // Last position the Java server told us about; Bedrock input is relative to it.
     private volatile Vector3f position = Vector3f.ZERO;
 
-    public ProxySession(SinkholeConfig config, AuthService auth, BedrockServerSession bedrock) {
+    public ProxySession(SinkholeConfig config, AuthService auth, BedrockServerSession bedrock, ChunkTranslator chunks) {
+        this.chunks = chunks;
         this.config = config;
         this.auth = auth;
         this.bedrock = bedrock;
@@ -228,7 +234,23 @@ public final class ProxySession implements BedrockPacketHandler {
             Component body = chat.getUnsignedContent() != null ? chat.getUnsignedContent() : Component.text(chat.getContent());
             sendText(Component.text("<").append(chat.getName()).append(Component.text("> ")).append(body), null, TextPacket.Type.RAW);
         }
-        // TODO(world): chunks, blocks, entities, inventory, effects, combat - see README "Status".
+        else if (p instanceof ClientboundLevelChunkWithLightPacket chunk) {
+            sendChunk(chunk);
+        }
+        // TODO(world): blocks updates, entities, inventory, effects, combat - see README "Status".
+    }
+
+    private void sendChunk(ClientboundLevelChunkWithLightPacket chunk) {
+        // Sections per column: the overworld is 24 (-64..320); other dimensions are not handled yet.
+        ChunkTranslator.Result r = chunks.translate(chunk.getChunkData(), 24);
+        LevelChunkPacket out = new LevelChunkPacket();
+        out.setChunkX(chunk.getX());
+        out.setChunkZ(chunk.getZ());
+        out.setDimension(0);
+        out.setSubChunksLength(r.subChunkCount);
+        out.setCachingEnabled(false);
+        out.setData(io.netty.buffer.Unpooled.wrappedBuffer(r.data));
+        bedrock.sendPacket(out);
     }
 
     private void sendText(Component component, String source, TextPacket.Type type) {
@@ -271,13 +293,22 @@ public final class ProxySession implements BedrockPacketHandler {
         start.setServerEngine("");
         start.setAuthoritativeMovementMode(AuthoritativeMovementMode.CLIENT);
         start.setBlockPalette(new NbtList<>(NbtType.COMPOUND, new ArrayList<NbtMap>()));
-        start.setItemDefinitions(new ArrayList<>());
+        start.setItemDefinitions(ItemDefinitions.load());
         start.setPlayerPropertyData(NbtMap.EMPTY);
         start.setWorldId("");
         start.setScenarioId("");
         start.setOwnerId("");
         start.setServerId("");
         bedrock.sendPacket(start);
+
+        ChunkRadiusUpdatedPacket radius = new ChunkRadiusUpdatedPacket();
+        radius.setRadius(Math.max(2, login.getViewDistance()));
+        bedrock.sendPacket(radius);
+
+        NetworkChunkPublisherUpdatePacket publisher = new NetworkChunkPublisherUpdatePacket();
+        publisher.setPosition(Vector3i.from(0, 100, 0));
+        publisher.setRadius(Math.max(2, login.getViewDistance()) * 16);
+        bedrock.sendPacket(publisher);
 
         PlayStatusPacket spawn = new PlayStatusPacket();
         spawn.setStatus(PlayStatusPacket.Status.PLAYER_SPAWN);
