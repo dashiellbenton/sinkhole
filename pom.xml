@@ -30,7 +30,7 @@
     <dependency>
       <groupId>org.geysermc.mcprotocollib</groupId>
       <artifactId>protocol</artifactId>
-      <version>26.1-1</version>
+      <version>26.2-SNAPSHOT</version>
     </dependency>
     <!-- Bedrock edition server protocol (what the Bedrock game connects to) -->
     <dependency>

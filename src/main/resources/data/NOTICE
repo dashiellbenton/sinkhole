@@ -1,0 +1,3 @@
+blocks.nbt, block_palette.nbt (block_palette.26_50.nbt) and related data are from GeyserMC/mappings and
+GeyserMC/Geyser, MIT licensed. They do not relicense Minecraft or any material owned by Mojang or Microsoft.
+java_blocks.txt was generated from the Minecraft Java 26.2 server data reports.
