@@ -35,6 +35,10 @@ public final class SinkholeConfig {
     }
 
     public int serverPort() {
+        return serverPort(19132);
+    }
+
+    public int serverPort(int defaultPort) {
         String s = server.trim();
         int i = s.lastIndexOf(':');
         if (i > 0 && s.indexOf(':') == i) {
@@ -43,17 +47,17 @@ public final class SinkholeConfig {
             } catch (NumberFormatException ignored) {
             }
         }
-        return 25565;
+        return defaultPort;
     }
 
     public static void writeDefault(Path file) throws IOException {
         Files.writeString(file, """
                 # SinkholeMC configuration
-                # Bedrock clients connect to this machine on this UDP port.
+                # Minecraft Java connects to this machine on this TCP port (join with localhost:35653).
                 bind-address: "0.0.0.0"
                 port: %d
 
-                # The Java Edition server to proxy to, as host or host:port. No default - you must set this.
+                # The Bedrock Edition server to proxy to, as host or host:port (port defaults to 19132). No default - you must set this.
                 server: ""
                 """.formatted(DEFAULT_PORT));
     }

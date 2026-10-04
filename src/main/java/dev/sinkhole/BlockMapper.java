@@ -26,10 +26,14 @@ import java.util.Map;
  */
 public final class BlockMapper {
     private final int[] javaToBedrock;
+    /** Reverse: Bedrock palette index -> Java state (first Java state mapping to it), and the same keyed by block hash. */
+    private final int[] bedrockIndexToJava;
+    private final Map<Integer, Integer> bedrockHashToJava = new HashMap<>();
     private final int airRuntimeId;
 
     public BlockMapper() throws IOException {
         List<NbtMap> palette = readPalette();
+        int[] hashes = readPaletteHashes();
         Map<NbtMap, Integer> runtimeIds = new HashMap<>();
         for (int i = 0; i < palette.size(); i++) {
             if (runtimeIds.put(palette.get(i), i) != null) {
@@ -41,6 +45,8 @@ public final class BlockMapper {
         String[] javaNames = readJavaNames(mappings.size());
 
         javaToBedrock = new int[mappings.size()];
+        bedrockIndexToJava = new int[palette.size()];
+        java.util.Arrays.fill(bedrockIndexToJava, -1);
         int air = -1;
         for (int id = 0; id < mappings.size(); id++) {
             NbtMap entry = mappings.get(id);
@@ -51,6 +57,10 @@ public final class BlockMapper {
                 throw new IllegalStateException("No Bedrock runtime id for Java state " + id + " (" + javaNames[id] + "): " + key);
             }
             javaToBedrock[id] = runtime;
+            if (bedrockIndexToJava[runtime] < 0) {
+                bedrockIndexToJava[runtime] = id;
+                bedrockHashToJava.put(hashes[runtime], id);
+            }
             if (id == 0) {
                 air = runtime;
             }
@@ -64,6 +74,29 @@ public final class BlockMapper {
 
     public int airRuntimeId() {
         return airRuntimeId;
+    }
+
+    /**
+     * Java block state for a Bedrock runtime id. {@code hashed} is StartGame's blockNetworkIdsHashed: the runtime
+     * id is then the block-state hash rather than the palette index. Unknown states become air.
+     */
+    public int toJava(int bedrockRuntimeId, boolean hashed) {
+        Integer java = hashed ? bedrockHashToJava.get(bedrockRuntimeId)
+                : (bedrockRuntimeId >= 0 && bedrockRuntimeId < bedrockIndexToJava.length && bedrockIndexToJava[bedrockRuntimeId] >= 0
+                ? Integer.valueOf(bedrockIndexToJava[bedrockRuntimeId]) : null);
+        return java == null ? 0 : java;
+    }
+
+    private static int[] readPaletteHashes() throws IOException {
+        try (NBTInputStream in = NbtUtils.createGZIPReader(resource("/data/block_palette.nbt"))) {
+            NbtMap root = (NbtMap) in.readTag();
+            List<NbtMap> blocks = root.getList("blocks", NbtType.COMPOUND);
+            int[] out = new int[blocks.size()];
+            for (int i = 0; i < out.length; i++) {
+                out[i] = blocks.get(i).getInt("network_id");
+            }
+            return out;
+        }
     }
 
     /** Bedrock runtime id for a Java block state id (air if unknown). */
