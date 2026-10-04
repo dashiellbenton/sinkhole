@@ -27,7 +27,7 @@ java -jar target/SinkholeMC.jar
 One player at a time; a second connection is refused. The Xbox gamertag the Bedrock server sees is swapped
 for the Java username you joined with, in chat, commands and player names (both directions).
 
-Requirements: Java 21+ (NetherNet bundles native WebRTC for Windows x64, Linux x64, macOS Intel/Apple Silicon). The Java client must be exactly **26.3** (the Java protocol version is not translated).
+Requirements: Java 21+. `target/SinkholeMC.jar` runs on Windows x64, Linux x64 and macOS (Intel/Apple Silicon); `tools/make-platform-jars.sh` makes smaller per-platform jars in `dist/`. The Java client must be exactly **26.3** (the Java protocol version is not translated).
 The Bedrock side speaks protocol 2193 (Bedrock 1.26.50).
 
 ## What works
