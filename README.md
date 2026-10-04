@@ -42,7 +42,7 @@ The Bedrock side speaks protocol 2193 (Bedrock 1.26.50).
   hurt/death animations
 - Health, food, experience, game mode, abilities, respawn
 - Inventory and hotbar, attacking, swinging, block breaking and placing
-- Chests, hoppers, dispensers/droppers, shulker boxes) and inventory clicks through Bedrock
+- Chests, hoppers, dispensers/droppers, shulker boxes, and inventory clicks through Bedrock
   item-stack requests
 
 ## Not done yet
