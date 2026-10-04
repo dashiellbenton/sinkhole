@@ -224,7 +224,7 @@ public final class Bridge implements BedrockUpstream.Listener {
             entities = new Entities(client, gamertag, javaName);
             inventory = new Inventory(gameData);
             containers = new Containers(inventory, upstream_ -> upstream.send(upstream_), client::send, () -> { });
-            upstream = new BedrockUpstream(id, config.serverHost(), config.serverPort(), this);
+            upstream = new BedrockUpstream(id, config.serverHost(), config.serverPort(), config.transport, this);
             upstream.connect();
         } catch (Exception e) {
             client.disconnect("Could not log in to Bedrock: " + e.getMessage());

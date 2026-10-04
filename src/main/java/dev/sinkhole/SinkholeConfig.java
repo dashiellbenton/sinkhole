@@ -17,8 +17,11 @@ public final class SinkholeConfig {
     public final int port;
     /** "host" or "host:port". Empty when the user hasn't filled it in yet. */
     public final String server;
+    /** "auto" (default), "raknet" or "nethernet". */
+    public final String transport;
 
-    private SinkholeConfig(String bindAddress, int port, String server) {
+    private SinkholeConfig(String bindAddress, int port, String server, String transport) {
+        this.transport = transport;
         this.bindAddress = bindAddress;
         this.port = port;
         this.server = server;
@@ -59,6 +62,10 @@ public final class SinkholeConfig {
 
                 # The Bedrock Edition server to proxy to, as host or host:port (port defaults to 19132). No default - you must set this.
                 server: ""
+
+                # How to talk to the Bedrock server: auto (detect), raknet (classic) or nethernet (Bedrock Dedicated Server
+                # with transport=nethernet, the default of its newest builds).
+                transport: auto
                 """.formatted(DEFAULT_PORT));
     }
 
@@ -73,6 +80,7 @@ public final class SinkholeConfig {
         return new SinkholeConfig(
                 String.valueOf(map.getOrDefault("bind-address", "0.0.0.0")),
                 port instanceof Number n ? n.intValue() : Integer.parseInt(String.valueOf(port)),
-                server == null ? "" : String.valueOf(server));
+                server == null ? "" : String.valueOf(server),
+                String.valueOf(map.getOrDefault("transport", "auto")).toLowerCase());
     }
 }

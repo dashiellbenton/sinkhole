@@ -70,7 +70,7 @@ public final class BedrockCodecs {
             PlayerListPacket.class, CorrectPlayerMovePredictionPacket.class, ChangeDimensionPacket.class,
             LevelEventPacket.class, AddItemEntityPacket.class, SetEntityDataPacket.class, SubChunkPacket.class,
             SubChunkRequestPacket.class, ResourcePackDataInfoPacket.class, ResourcePackChunkDataPacket.class,
-            ResourcePackChunkRequestPacket.class, ContainerOpenPacket.class, ContainerClosePacket.class,
+            ResourcePackChunkRequestPacket.class, PacketViolationWarningPacket.class, ContainerOpenPacket.class, ContainerClosePacket.class,
             ItemStackResponsePacket.class, ItemStackRequestPacket.class,
             // serverbound: what we send must still be encodable
             RequestNetworkSettingsPacket.class, LoginPacket.class, ClientToServerHandshakePacket.class,
@@ -91,10 +91,43 @@ public final class BedrockCodecs {
         }
     };
 
+    /** Writes a {@link RawAuthPayload} login itself and leaves every other login to the stock serializer. */
+    private static BedrockPacketSerializer<LoginPacket> rawLogin(BedrockPacketSerializer<LoginPacket> stock) {
+        return new BedrockPacketSerializer<>() {
+            @Override
+            public void serialize(ByteBuf buffer, BedrockCodecHelper helper, LoginPacket packet) {
+                if (!(packet.getAuthPayload() instanceof RawAuthPayload raw)) {
+                    stock.serialize(buffer, helper, packet);
+                    return;
+                }
+                byte[] auth = raw.json().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                byte[] client = packet.getClientJwt().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                buffer.writeInt(packet.getProtocolVersion());
+                ByteBuf body = buffer.alloc().buffer(8 + auth.length + client.length);
+                try {
+                    body.writeIntLE(auth.length);
+                    body.writeBytes(auth);
+                    body.writeIntLE(client.length);
+                    body.writeBytes(client);
+                    VarInts.writeUnsignedInt(buffer, body.readableBytes());
+                    buffer.writeBytes(body);
+                } finally {
+                    body.release();
+                }
+            }
+
+            @Override
+            public void deserialize(ByteBuf buffer, BedrockCodecHelper helper, LoginPacket packet) {
+                stock.deserialize(buffer, helper, packet);
+            }
+        };
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static BedrockCodec select() {
         BedrockCodec base = base();
-        BedrockCodec.Builder builder = base.toBuilder().updateSerializer(ItemComponentPacket.class, WIDE_ITEM_COMPONENTS);
+        BedrockCodec.Builder builder = base.toBuilder().updateSerializer(ItemComponentPacket.class, WIDE_ITEM_COMPONENTS)
+                .updateSerializer(LoginPacket.class, rawLogin(base.getPacketDefinition(LoginPacket.class).getSerializer()));
         for (int id = 0; id < 512; id++) {
             BedrockPacketDefinition<?> def = base.getPacketDefinition(id);
             if (def == null) {

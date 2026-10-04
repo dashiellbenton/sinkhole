@@ -60,14 +60,124 @@ public final class BedrockUpstream implements BedrockPacketHandler {
     private volatile BedrockClientSession session;
     private boolean closed;
 
-    public BedrockUpstream(AuthService.Identity identity, String host, int port, Listener listener) {
+    private final String transport;
+    private NetherNetClient nether;
+    private boolean usingNetherNet;
+
+    public BedrockUpstream(AuthService.Identity identity, String host, int port, String transport, Listener listener) {
         this.identity = identity;
         this.host = host;
         this.port = port;
+        this.transport = transport == null ? "auto" : transport;
         this.listener = listener;
     }
 
+    /** Connects over RakNet or NetherNet ("auto" asks the server's HTTP endpoint which one it speaks). */
     public void connect() {
+        Thread t = new Thread(() -> {
+            boolean nn = switch (transport) {
+                case "nethernet" -> true;
+                case "raknet" -> false;
+                default -> NetherNetClient.isNetherNetServer(host, port);
+            };
+            if (nn) {
+                connectNetherNet();
+            } else {
+                connectRakNet();
+            }
+        }, "sinkhole-bedrock-connect");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /**
+     * NetherNet: the WebRTC data channel is bridged into a normal Bedrock netty pipeline through an in-JVM local channel
+     * pair, so the packet codecs, compression and session handling are exactly the ones used for RakNet.
+     */
+    private void connectNetherNet() {
+        usingNetherNet = true;
+        try {
+            io.netty.channel.EventLoopGroup local = new MultiThreadIoEventLoopGroup(1, io.netty.channel.local.LocalIoHandler.newFactory());
+            io.netty.channel.local.LocalAddress address = new io.netty.channel.local.LocalAddress("sinkhole-nn-" + System.nanoTime());
+            java.util.concurrent.atomic.AtomicReference<Channel> serverSide = new java.util.concurrent.atomic.AtomicReference<>();
+
+            nether = new NetherNetClient(new NetherNetClient.Listener() {
+                @Override
+                public void onMessage(io.netty.buffer.ByteBuf data) {
+                    Channel c = serverSide.get();
+                    if (c == null) {
+                        data.release();
+                    } else {
+                        c.writeAndFlush(data);
+                    }
+                }
+
+                @Override
+                public void onClosed(String reason) {
+                    fail("The NetherNet connection closed: " + reason);
+                }
+            });
+            java.util.function.UnaryOperator<String> assertion = NetherNetIdentity.assertion(identity.key(), identity.serviceToken(), NetherNetIdentity.DEFAULT_DOMAIN);
+            nether.connect(host, port, assertion);
+
+            new io.netty.bootstrap.ServerBootstrap()
+                    .group(local)
+                    .channel(io.netty.channel.local.LocalServerChannel.class)
+                    .childHandler(new io.netty.channel.ChannelInitializer<io.netty.channel.local.LocalChannel>() {
+                        @Override
+                        protected void initChannel(io.netty.channel.local.LocalChannel ch) {
+                            serverSide.set(ch);
+                            ch.pipeline().addLast(new io.netty.channel.ChannelInboundHandlerAdapter() {
+                                @Override
+                                public void channelRead(io.netty.channel.ChannelHandlerContext ctx, Object msg) {
+                                    nether.send((io.netty.buffer.ByteBuf) msg);
+                                }
+                            });
+                        }
+                    }).bind(address).sync();
+
+            new Bootstrap()
+                    .group(local)
+                    .channel(io.netty.channel.local.LocalChannel.class)
+                    .handler(new io.netty.channel.ChannelInitializer<io.netty.channel.local.LocalChannel>() {
+                        @Override
+                        protected void initChannel(io.netty.channel.local.LocalChannel ch) {
+                            io.netty.channel.ChannelPipeline p = ch.pipeline();
+                            // Same stack as BedrockClientInitializer, with NetherNet framing instead of the RakNet frame id.
+                            p.addLast(org.cloudburstmc.protocol.bedrock.netty.codec.FrameIdCodec.NAME, new NetherNetFraming()); // encryption is inserted relative to this name
+                            p.addLast("compression-codec", new org.cloudburstmc.protocol.bedrock.netty.codec.compression.CompressionCodec(
+                                    BedrockClientInitializer.getCompression(org.cloudburstmc.protocol.bedrock.data.PacketCompressionAlgorithm.ZLIB, 11, true), false));
+                            p.addLast("bedrock-batch-decoder", new org.cloudburstmc.protocol.bedrock.netty.codec.batch.BedrockBatchDecoder());
+                            p.addLast("bedrock-batch-encoder", new org.cloudburstmc.protocol.bedrock.netty.codec.batch.BedrockBatchEncoder());
+                            p.addLast("bedrock-packet-codec", new org.cloudburstmc.protocol.bedrock.netty.codec.packet.BedrockPacketCodec_v3());
+                            p.addLast("bedrock-peer", new org.cloudburstmc.protocol.bedrock.BedrockPeer(ch, (peer, subClientId) -> {
+                                BedrockClientSession s = new BedrockClientSession(peer, subClientId);
+                                initSession(s);
+                                return s;
+                            }) {
+                                @Override
+                                public int getRakVersion() {
+                                    return 11; // the stock peer reads this from RakNet channel options, which a local channel lacks
+                                }
+                            });
+                        }
+                    }).connect(address).sync();
+        } catch (Exception e) {
+            fail("Could not connect to the NetherNet server " + host + ":" + port + ": " + e.getMessage());
+        }
+    }
+
+    private void initSession(BedrockClientSession s) {
+        session = s;
+        s.setLogging(DEBUG);
+        s.setCodec(BedrockCodecs.current());
+        s.setPacketHandler(BedrockUpstream.this);
+        RequestNetworkSettingsPacket req = new RequestNetworkSettingsPacket();
+        req.setProtocolVersion(BedrockCodecs.current().getProtocolVersion());
+        s.sendPacketImmediately(req);
+    }
+
+    private void connectRakNet() {
         new Bootstrap()
                 .channelFactory(RakChannelFactory.client(NioDatagramChannel.class))
                 .group(group)
@@ -76,13 +186,7 @@ public final class BedrockUpstream implements BedrockPacketHandler {
                 .handler(new BedrockClientInitializer() {
                     @Override
                     protected void initSession(BedrockClientSession s) {
-                        session = s;
-                        s.setLogging(DEBUG);
-                        s.setCodec(BedrockCodecs.current());
-                        s.setPacketHandler(BedrockUpstream.this);
-                        RequestNetworkSettingsPacket req = new RequestNetworkSettingsPacket();
-                        req.setProtocolVersion(BedrockCodecs.current().getProtocolVersion());
-                        s.sendPacketImmediately(req);
+                        BedrockUpstream.this.initSession(s);
                     }
                 })
                 .connect(new InetSocketAddress(host, port))
@@ -105,6 +209,9 @@ public final class BedrockUpstream implements BedrockPacketHandler {
         BedrockClientSession s = session;
         if (s != null) {
             s.disconnect();
+        }
+        if (nether != null) {
+            nether.close();
         }
         group.shutdownGracefully();
     }
@@ -152,6 +259,9 @@ public final class BedrockUpstream implements BedrockPacketHandler {
                 || packet instanceof ResourcePackDataInfoPacket || packet instanceof ResourcePackChunkDataPacket) {
             return packet.handle(this); // the handle(...) methods below
         }
+        if (packet instanceof org.cloudburstmc.protocol.bedrock.packet.PacketViolationWarningPacket v) {
+            System.err.println("[Sinkhole] The Bedrock server reported a protocol violation: " + v);
+        }
         if (packet instanceof StartGamePacket sg) {
             registerDefinitions(sg);
         } else if (packet instanceof org.cloudburstmc.protocol.bedrock.packet.ItemComponentPacket ic) {
@@ -168,9 +278,9 @@ public final class BedrockUpstream implements BedrockPacketHandler {
             String pub = Base64.getEncoder().encodeToString(identity.key().getPublic().getEncoded());
             LoginPacket login = new LoginPacket();
             login.setProtocolVersion(BedrockCodecs.current().getProtocolVersion());
-            login.setAuthPayload(new CertificateChainPayload(identity.chain(), identity.authType()));
+            login.setAuthPayload(identity.payload());
             login.setClientJwt(Jwts.sign(identity.key(), pub,
-                    ClientData.payload(identity, host + ":" + port, BedrockCodecs.current().getMinecraftVersion())));
+                    ClientData.payload(identity, usingNetherNet ? "http://" + host + ":" + port + ":" + port : host + ":" + port, BedrockCodecs.current().getMinecraftVersion())));
             session.sendPacketImmediately(login);
         } catch (Exception e) {
             fail("Could not build the Bedrock login: " + e.getMessage());
@@ -187,7 +297,9 @@ public final class BedrockUpstream implements BedrockPacketHandler {
             byte[] salt = Base64.getDecoder().decode(com.google.gson.JsonParser
                     .parseString(jws.getUnverifiedPayload()).getAsJsonObject().get("salt").getAsString());
             SecretKey key = EncryptionUtils.getSecretKey(identity.key().getPrivate(), serverKey, salt);
-            session.enableEncryption(key);
+            if (!usingNetherNet) {
+                session.enableEncryption(key); // NetherNet is already encrypted by DTLS, so only the acknowledgement is sent
+            }
             session.sendPacketImmediately(new ClientToServerHandshakePacket());
         } catch (Exception e) {
             fail("Encryption handshake with the Bedrock server failed: " + e.getMessage());

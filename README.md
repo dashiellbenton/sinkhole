@@ -5,7 +5,7 @@ in with your Microsoft/Xbox account. It is the opposite of Geyser: Geyser lets B
 servers, Sinkhole lets a Java client join Bedrock servers.
 
 ```
-Java client  --TCP-->  SinkholeMC  --RakNet/UDP + Xbox login-->  Bedrock server
+Java client  --TCP-->  SinkholeMC  --RakNet or NetherNet + Xbox login-->  Bedrock server
 ```
 
 Because the real server is a Bedrock server, Bedrock gameplay rules (PvP, attack cooldown, movement,
@@ -27,13 +27,17 @@ java -jar target/SinkholeMC.jar
 One player at a time; a second connection is refused. The Xbox gamertag the Bedrock server sees is swapped
 for the Java username you joined with, in chat, commands and player names (both directions).
 
-Requirements: Java 21+. The Java client must be exactly **26.3** (the Java protocol version is not translated).
+Requirements: Java 21+ (NetherNet bundles native WebRTC for Windows x64, Linux x64, macOS Intel/Apple Silicon). The Java client must be exactly **26.3** (the Java protocol version is not translated).
 The Bedrock side speaks protocol 2193 (Bedrock 1.26.50).
 
 ## What works
 
 - Xbox device-code sign-in, config generation, quit-on-missing-config
-- Bedrock login/encryption handshake over RakNet (negative RakNet GUID, as real clients use) and resource-pack
+- Both Bedrock transports: **RakNet** (classic) and **NetherNet** (WebRTC; what the newest vanilla Bedrock
+  Dedicated Server uses by default). `transport: auto` in `config.yml` asks the server's HTTP endpoint which one
+  it speaks. NetherNet is for servers you can reach directly (`host:port`, e.g. a dedicated server on your PC);
+  Realms/friend-list/Xbox-signaled worlds are not supported.
+- Bedrock 1.26.10+ login (multiplayer token + client data), encryption handshake, and resource-pack
   download (packs are fetched and discarded so servers that require them accept the connection)
 - World: chunks (including the newer "request sub-chunks" mode), biomes, block updates, weather, time
 - Movement: position/rotation, sneak/sprint/jump/fly input, server corrections, knockback, dimension changes
@@ -49,8 +53,8 @@ The Bedrock side speaks protocol 2193 (Bedrock 1.26.50).
 
 Block entities (sign text, banners, skulls), crafting tables/furnaces/anvils and other special screens (they are
 closed again), the crafting grid, creative inventory, entity equipment/effects/riding, particles and sounds,
-waterlogging, custom (data-driven) blocks and items, skins (a plain skin is used), NetherNet transport,
-Java versions other than 26.3. Expect rough edges.
+waterlogging, custom (data-driven) blocks and items, skins (a plain skin is used), Xbox-signaled NetherNet
+(Realms, friends' worlds), Java versions other than 26.3. Expect rough edges.
 
 ## Testing status - please read
 
@@ -61,10 +65,12 @@ headless Java client against:
 - [Dragonfly](https://github.com/df-mc/dragonfly), an independent Bedrock server on the same protocol, with
   authentication disabled: login, StartGame, hundreds of chunks, time/attributes, two-way chat
 
-**Not verified:** the real Microsoft/Xbox sign-in (needs a human to enter the code), a real Java game
-client, vanilla Bedrock Dedicated Server (its newest builds only accept the NetherNet transport, which
-Sinkhole does not implement; older builds that use RakNet were not accepted by an offline test login), and
-public servers. The first run against a real server may need fixes.
+- **vanilla Bedrock Dedicated Server 1.26.52.3** over NetherNet with `online-mode=false`: join, real terrain
+  chunks, mobs, items, chat, attributes
+
+**Not verified:** the real Microsoft/Xbox sign-in (it needs a person to enter the code; the Xbox-authenticated
+login and the NetherNet identity for real accounts are implemented from the protocol but untested), a real Java
+game client, and public servers. The first run against a real server may need fixes.
 
 Developer flag for testing against servers with authentication disabled: `--offline <gamertag>`.
 `SINKHOLE_DEBUG=1` prints packet-level logs.

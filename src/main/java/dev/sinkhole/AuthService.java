@@ -24,8 +24,17 @@ import java.util.UUID;
  */
 public final class AuthService {
     /** What the Bedrock server needs from us to log in. */
-    public record Identity(String gamertag, String xuid, UUID uuid, List<String> chain, AuthType authType, KeyPair key) {
+    /** @param serviceToken the Minecraft authorization-service JWT (NetherNet identity); null when offline */
+    public record Identity(String gamertag, String xuid, UUID uuid, List<String> chain, AuthType authType, KeyPair key, String serviceToken,
+                           String loginToken, int deviceOs) {
+        /** Bedrock 1.26.10+ logins carry one multiplayer token instead of a certificate chain. */
+        public org.cloudburstmc.protocol.bedrock.data.auth.AuthPayload payload() {
+            return new RawAuthPayload(authType, loginToken, chain);
+        }
     }
+
+    /** First Bedrock protocol (1.26.10) that logs in with a multiplayer token instead of a certificate chain. */
+    private static final int NEW_LOGIN_PROTOCOL = 944;
 
     private final Path cacheFile;
     private final String gameVersion;
@@ -85,9 +94,34 @@ public final class AuthService {
             return offlineIdentity();
         }
         MinecraftCertificateChain chain = manager.getMinecraftCertificateChain().getUpToDate();
+        String token = null;
+        if (BedrockCodecs.current().getProtocolVersion() >= NEW_LOGIN_PROTOCOL) {
+            try {
+                token = manager.getMinecraftMultiplayerToken().getUpToDate().getToken();
+            } catch (Exception e) {
+                System.err.println("[Sinkhole] Could not get a multiplayer token (" + e.getMessage() + "), using the certificate chain.");
+            }
+        }
         save();
         return new Identity(chain.getIdentityDisplayName(), chain.getIdentityXuid(), chain.getIdentityUuid(),
-                List.of(chain.getIdentityJwt(), chain.getMojangJwt()), AuthType.FULL, manager.getSessionKeyPair());
+                List.of(chain.getIdentityJwt(), chain.getMojangJwt()), AuthType.FULL, manager.getSessionKeyPair(), serviceToken(), token, deviceOs(manager.getDeviceType()));
+    }
+
+    /** ClientData DeviceOS for the device type the Xbox login was made as. */
+    private static int deviceOs(String deviceType) {
+        return switch (deviceType == null ? "" : deviceType) {
+            case "Android" -> 1;
+            case "iOS" -> 2;
+            case "Nintendo" -> 12;
+            case "Xbox" -> 11;
+            default -> 7; // Win32
+        };
+    }
+
+    /** The Minecraft authorization-service token (a JWT binding our session key), used for NetherNet. */
+    private String serviceToken() throws IOException {
+        String header = manager.getMinecraftSession().getUpToDate().getAuthorizationHeader();
+        return header.startsWith("MCToken ") ? header.substring("MCToken ".length()) : header;
     }
 
     private Identity offlineIdentity() {
@@ -96,10 +130,27 @@ public final class AuthService {
             String pub = Base64.getEncoder().encodeToString(kp.getPublic().getEncoded());
             long now = System.currentTimeMillis() / 1000;
             UUID uuid = UUID.nameUUIDFromBytes(("Sinkhole:" + offlineName).getBytes());
+            if (BedrockCodecs.current().getProtocolVersion() >= NEW_LOGIN_PROTOCOL) {
+                // self-signed multiplayer token, as an unauthenticated client of 1.26.10+ sends
+                com.google.gson.JsonObject claims = new com.google.gson.JsonObject();
+                claims.addProperty("exp", now + 6 * 3600);
+                claims.addProperty("nbf", now - 6 * 3600);
+                com.google.gson.JsonArray aud = new com.google.gson.JsonArray();
+                aud.add("api://auth-minecraft-services/multiplayer");
+                claims.add("aud", aud);
+                claims.addProperty("ipt", "");
+                claims.addProperty("mid", "");
+                claims.addProperty("tid", "");
+                claims.addProperty("cpk", pub);
+                claims.addProperty("xid", "");
+                claims.addProperty("xname", offlineName);
+                claims.addProperty("leguuid", uuid.toString());
+                return new Identity(offlineName, "", uuid, List.of(), AuthType.SELF_SIGNED, kp, null, Jwts.sign(kp, pub, claims.toString()), 1);
+            }
             String jwt = Jwts.sign(kp, pub, "{\"identityPublicKey\":\"" + pub + "\",\"iss\":\"self\",\"randomNonce\":" + System.nanoTime()
                     + ",\"iat\":" + now + ",\"nbf\":" + (now - 60) + ",\"exp\":" + (now + 86400)
                     + ",\"extraData\":{\"displayName\":\"" + offlineName + "\",\"identity\":\"" + uuid + "\",\"XUID\":\"0\",\"titleId\":\"896928775\"}}");
-            return new Identity(offlineName, "0", uuid, List.of(jwt), AuthType.SELF_SIGNED, kp);
+            return new Identity(offlineName, "0", uuid, List.of(jwt), AuthType.SELF_SIGNED, kp, null, null, 1);
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
