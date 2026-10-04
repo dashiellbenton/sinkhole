@@ -30,7 +30,7 @@
     <dependency>
       <groupId>org.geysermc.mcprotocollib</groupId>
       <artifactId>protocol</artifactId>
-      <version>26.1-1</version>
+      <version>26.3-SNAPSHOT</version>
     </dependency>
     <!-- Bedrock edition server protocol (what the Bedrock game connects to) -->
     <dependency>
@@ -52,12 +52,12 @@
     <dependency>
       <groupId>net.kyori</groupId>
       <artifactId>adventure-text-serializer-legacy</artifactId>
-      <version>4.25.0</version>
+      <version>5.2.0</version>
     </dependency>
     <dependency>
       <groupId>net.kyori</groupId>
       <artifactId>adventure-text-serializer-plain</artifactId>
-      <version>4.25.0</version>
+      <version>5.2.0</version>
     </dependency>
     <dependency>
       <groupId>org.yaml</groupId>
@@ -69,10 +69,32 @@
       <artifactId>slf4j-simple</artifactId>
       <version>2.0.16</version>
     </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.11.4</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
     <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+        <configuration>
+          <showWarnings>true</showWarnings>
+          <compilerArgs>
+            <arg>-Xlint:all,-processing,-serial</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.2</version>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>

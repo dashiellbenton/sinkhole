@@ -1,7 +1,15 @@
 # SinkholeMC
 
-A single-user proxy that lets the **Bedrock** game join a **Java Edition** server, signed in with your
-Microsoft/Xbox account. (Think "Geyser, but you run it yourself with your own account".)
+A single-user proxy that lets you join a **Bedrock Edition server** from **Minecraft: Java Edition**, signed
+in with your Microsoft/Xbox account. It is the opposite of Geyser: Geyser lets Bedrock clients join Java
+servers, Sinkhole lets a Java client join Bedrock servers.
+
+```
+Java client  --TCP-->  SinkholeMC  --RakNet/UDP + Xbox login-->  Bedrock server
+```
+
+Because the real server is a Bedrock server, Bedrock gameplay rules (PvP, attack cooldown, movement,
+anti-cheat) are applied by that server. Sinkhole only translates packets; it does not change game mechanics.
 
 ## Use
 
@@ -11,31 +19,56 @@ java -jar target/SinkholeMC.jar
 ```
 
 1. First launch prints a `microsoft.com/link` code. Enter it to sign in (cached in `auth.json`).
-2. A `config.yml` is generated (`port` defaults to **35653**, `server` has no default) and SinkholeMC exits.
-3. Set `server:` to the Java server (`host` or `host:port`) and start it again.
+2. `config.yml` is generated (`port` defaults to **35653**, `server` has no default) and SinkholeMC exits.
+3. Set `server:` to the Bedrock server (`host` or `host:port`, port defaults to 19132) and start it again.
    If `config.yml` or `server` is missing, SinkholeMC prints a message and quits.
-4. In Bedrock, add a server pointing at this machine on the configured port (UDP).
+4. In Minecraft **Java Edition 26.3**, add a server `localhost:35653` and join.
 
-Only one player is proxied at a time; a second connection is refused. The Java username of the signed-in
-account replaces the Bedrock gamertag (chat/commands you send, and the identity used to log in).
+One player at a time; a second connection is refused. The Xbox gamertag the Bedrock server sees is swapped
+for the Java username you joined with, in chat, commands and player names (both directions).
 
-## Status - read this
+Requirements: Java 21+. The Java client must be exactly **26.3** (the Java protocol version is not translated).
+The Bedrock side speaks protocol 2193 (Bedrock 1.26.50).
 
-This is a **foundation**, not a finished Geyser replacement. Implemented and compiling:
+## What works
 
-- Device-code Microsoft login + token caching, config/exit behaviour above
-- RakNet/Bedrock listener (protocol 1.26.x codec `Bedrock_v2193`), login handshake, single-user lock
-- Java client login with your account (MCProtocolLib 26.1), keep-alive handled by the library
-- Chat both directions, Java username substitution, disconnect messages, position sync, basic movement
+- Xbox device-code sign-in, config generation, quit-on-missing-config
+- Bedrock login/encryption handshake over RakNet (negative RakNet GUID, as real clients use) and resource-pack
+  download (packs are fetched and discarded so servers that require them accept the connection)
+- World: chunks (including the newer "request sub-chunks" mode), biomes, block updates, weather, time
+- Movement: position/rotation, sneak/sprint/jump/fly input, server corrections, knockback, dimension changes
+- Chat and commands, with the gamertag <-> Java name swap in both directions
+- Entities: players (tab list too), mobs whose Bedrock name matches a Java entity type, dropped items, names,
+  hurt/death animations
+- Health, food, experience, game mode, abilities, respawn
+- Inventory and hotbar, attacking, swinging, block breaking and placing
+- Chests, hoppers, dispensers/droppers, shulker boxes, and inventory clicks through Bedrock
+  item-stack requests
 
-**Not implemented yet** (the bulk of Geyser): chunk/block translation (needs the Java<->Bedrock block
-palettes), entities, inventories/items, combat, effects, forms, skins, resource packs, and so on.
-Until chunk translation exists the Bedrock client will not show a world.
+## Not done yet
 
-## About "Bedrock PvP / cooldown" and bans
+Block entities (sign text, banners, skulls), crafting tables/furnaces/anvils and other special screens (they are
+closed again), the crafting grid, creative inventory, entity equipment/effects/riding, particles and sounds,
+waterlogging, custom (data-driven) blocks and items, skins (a plain skin is used), NetherNet transport,
+Java versions other than 26.3. Expect rough edges.
 
-Sinkhole does **not** make Java servers apply Bedrock combat rules. The Java server sees a normal Java
-client, so Java combat (attack cooldown etc.) applies, exactly as with Geyser. Sending attacks faster than
-Java's cooldown allows, or otherwise faking client behaviour to get Bedrock-style PvP on a Java server, is
-what anti-cheats flag and ban for, so it is deliberately not part of this project. Public servers may also
-prohibit proxies/modified clients; check their rules.
+## Testing status - please read
+
+Build and unit tests: `mvn verify` (also run by the GitHub Actions workflow). Integration checks were done with a
+headless Java client against:
+- a small fake Bedrock server (in `src/test`) serving a flat world: join, chunks, entities, health,
+  inventory, chat with name swap, attack/break actions
+- [Dragonfly](https://github.com/df-mc/dragonfly), an independent Bedrock server on the same protocol, with
+  authentication disabled: login, StartGame, hundreds of chunks, time/attributes, two-way chat
+
+**Not verified:** the real Microsoft/Xbox sign-in (needs a human to enter the code), a real Java game
+client, vanilla Bedrock Dedicated Server (its newest builds only accept the NetherNet transport, which
+Sinkhole does not implement; older builds that use RakNet were not accepted by an offline test login), and
+public servers. The first run against a real server may need fixes.
+
+Developer flag for testing against servers with authentication disabled: `--offline <gamertag>`.
+`SINKHOLE_DEBUG=1` prints packet-level logs.
+
+Data files under `src/main/resources/data` come from GeyserMC's mappings (MIT; the `feature/26.3` branch of
+`GeyserMC/mappings`, Java 26.3 / Bedrock 1.26.50); see `data/NOTICE`. `tools/build_block_map.py` regenerates
+`block_map.txt` when the mappings change.
