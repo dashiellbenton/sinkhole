@@ -57,6 +57,15 @@ public final class JavaTestClient {
                     zombie[0] = a.getEntityId();
                     System.out.println("zombie spawned id=" + a.getEntityId() + " at " + a.getX() + "," + a.getY() + "," + a.getZ());
                 }
+                if (p instanceof org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundOpenScreenPacket o) {
+                    System.out.println("open screen " + o.getType() + " window=" + o.getContainerId());
+                    s.send(new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket(
+                            o.getContainerId(), 1, 0, org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType.CLICK_ITEM,
+                            org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickItemAction.LEFT_CLICK, null, new it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap<>()));
+                }
+                if (p instanceof org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundContainerSetContentPacket sc && sc.getContainerId() != 0) {
+                    System.out.println("chest content window=" + sc.getContainerId() + " slot0=" + sc.getItems()[0] + " size=" + sc.getItems().length);
+                }
                 if (p instanceof ClientboundSetHealthPacket h) {
                     System.out.println("health=" + h.getHealth() + " food=" + h.getFood());
                 }

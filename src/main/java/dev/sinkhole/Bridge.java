@@ -40,6 +40,11 @@ import org.cloudburstmc.protocol.bedrock.data.inventory.ItemData;
 import org.cloudburstmc.protocol.bedrock.data.inventory.transaction.InventoryTransactionType;
 import org.cloudburstmc.protocol.bedrock.data.inventory.transaction.ItemUseTransaction;
 import org.cloudburstmc.protocol.bedrock.data.inventory.HandSlot;
+import org.cloudburstmc.protocol.bedrock.packet.ContainerClosePacket;
+import org.cloudburstmc.protocol.bedrock.packet.ContainerOpenPacket;
+import org.cloudburstmc.protocol.bedrock.packet.ItemStackResponsePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClosePacket;
 import org.cloudburstmc.protocol.bedrock.packet.AddItemEntityPacket;
 import org.cloudburstmc.protocol.bedrock.packet.SetEntityDataPacket;
 import org.cloudburstmc.protocol.bedrock.packet.AddEntityPacket;
@@ -161,6 +166,7 @@ public final class Bridge implements BedrockUpstream.Listener {
     private String xuid = "";
     private Entities entities;
     private Inventory inventory;
+    private Containers containers;
 
     // Player state mirrored from Bedrock attributes
     private float health = 20, hunger = 20, saturation = 5, xpProgress, xpLevel;
@@ -217,6 +223,7 @@ public final class Bridge implements BedrockUpstream.Listener {
             xuid = id.xuid() == null ? "" : id.xuid();
             entities = new Entities(client, gamertag, javaName);
             inventory = new Inventory(gameData);
+            containers = new Containers(inventory, upstream_ -> upstream.send(upstream_), client::send, () -> { });
             upstream = new BedrockUpstream(id, config.serverHost(), config.serverPort(), this);
             upstream.connect();
         } catch (Exception e) {
@@ -351,17 +358,35 @@ public final class Bridge implements BedrockUpstream.Listener {
             }
         } else if (p instanceof InventoryContentPacket ic) {
             if (DEBUG) {
-                System.out.println("[debug] inventory content container=" + ic.getContainerId() + " items=" + ic.getContents().size() + " first=" + (ic.getContents().isEmpty() ? null : ic.getContents().get(0)));
+                System.out.println("[debug] inventory content container=" + ic.getContainerId() + " items=" + ic.getContents().size());
             }
-            inventory.content(ic);
-            if (javaPlaying) {
-                client.send(inventory.javaContent());
+            if (!containers.content(ic)) {
+                inventory.content(ic);
+                if (javaPlaying) {
+                    if (containers.isOpen()) {
+                        containers.sendContent();
+                    } else {
+                        client.send(inventory.javaContent());
+                    }
+                }
             }
         } else if (p instanceof InventorySlotPacket is) {
-            inventory.slot(is);
-            if (javaPlaying) {
-                client.send(inventory.javaContent());
+            if (!containers.slot(is)) {
+                inventory.slot(is);
+                if (javaPlaying) {
+                    if (containers.isOpen()) {
+                        containers.sendContent();
+                    } else {
+                        client.send(inventory.javaContent());
+                    }
+                }
             }
+        } else if (p instanceof ContainerOpenPacket co) {
+            containers.open(co);
+        } else if (p instanceof ContainerClosePacket cc) {
+            containers.closedByServer(cc);
+        } else if (p instanceof ItemStackResponsePacket ir) {
+            containers.response(ir);
         } else if (p instanceof SetTimePacket st) {
             if (javaPlaying) {
                 int clock = registries.idOf("minecraft:world_clock", "minecraft:overworld");
@@ -507,6 +532,10 @@ public final class Bridge implements BedrockUpstream.Listener {
             } else {
                 stopFlying = true;
             }
+        } else if (p instanceof ServerboundContainerClickPacket cl) {
+            containers.click(cl);
+        } else if (p instanceof ServerboundContainerClosePacket cl) {
+            containers.closedByClient(cl.getContainerId());
         } else if (p instanceof ServerboundClientCommandPacket c) {
             if (c.getRequest() == ClientCommand.PERFORM_RESPAWN) {
                 RespawnPacket r = new RespawnPacket();

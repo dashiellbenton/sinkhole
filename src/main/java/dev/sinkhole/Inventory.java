@@ -13,11 +13,13 @@ public final class Inventory {
     private static final int MAIN = 0;
     private static final int OFFHAND = 119;
     private static final int ARMOR = 120;
+    private static final int CURSOR = 124;
 
     private final GameData data;
     private final ItemData[] main = new ItemData[36];
     private final ItemData[] armor = new ItemData[4];
     private ItemData offhand = ItemData.AIR;
+    private ItemData cursor = ItemData.AIR;
     private int heldSlot;
 
     public Inventory(GameData data) {
@@ -51,6 +53,7 @@ public final class Inventory {
                 }
             }
             case OFFHAND -> offhand = item;
+            case CURSOR -> cursor = item;
             default -> { }
         }
     }
@@ -65,6 +68,38 @@ public final class Inventory {
 
     public ItemData held() {
         return main[heldSlot];
+    }
+
+    public ItemData main(int slot) {
+        return main[slot];
+    }
+
+    public void setMain(int slot, ItemData item) {
+        main[slot] = item;
+    }
+
+    public ItemData armor(int slot) {
+        return armor[slot];
+    }
+
+    public void setArmor(int slot, ItemData item) {
+        armor[slot] = item;
+    }
+
+    public ItemData offhand() {
+        return offhand;
+    }
+
+    public void setOffhand(ItemData item) {
+        offhand = item;
+    }
+
+    public ItemData cursor() {
+        return cursor;
+    }
+
+    public void setCursor(ItemData item) {
+        cursor = item;
     }
 
     public ItemData slotItem(int slot) {

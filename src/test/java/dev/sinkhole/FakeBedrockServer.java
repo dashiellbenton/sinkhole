@@ -318,7 +318,43 @@ public final class FakeBedrockServer {
             z.setMotion(Vector3f.ZERO);
             z.setRotation(Vector2f.ZERO);
             s.sendPacket(z);
+
+            if (System.getenv("FAKE_CHEST") != null) {
+                ContainerOpenPacket co = new ContainerOpenPacket();
+                co.setId((byte) 2);
+                co.setType(org.cloudburstmc.protocol.bedrock.data.inventory.ContainerType.CONTAINER);
+                co.setBlockPosition(Vector3i.from(8, -52, 9));
+                co.setUniqueEntityId(-1);
+                s.sendPacket(co);
+                InventoryContentPacket chest = new InventoryContentPacket();
+                chest.setContainerId(2);
+                List<org.cloudburstmc.protocol.bedrock.data.inventory.ItemData> ci = new ArrayList<>();
+                var stoneDef = ItemDefinitions.load().stream().filter(d -> d.getIdentifier().equals("minecraft:cobblestone")).findFirst().orElseThrow();
+                for (int i = 0; i < 27; i++) {
+                    ci.add(i == 0 ? org.cloudburstmc.protocol.bedrock.data.inventory.ItemData.builder().definition(stoneDef).count(12).netId(5).usingNetId(true).build()
+                            : org.cloudburstmc.protocol.bedrock.data.inventory.ItemData.AIR);
+                }
+                chest.setContents(ci);
+                chest.setContainerNameData(new org.cloudburstmc.protocol.bedrock.data.inventory.FullContainerName(
+                        org.cloudburstmc.protocol.bedrock.data.inventory.ContainerSlotType.LEVEL_ENTITY, null));
+                s.sendPacket(chest);
+            }
             return PacketSignal.HANDLED;
+        }
+
+        @Override
+        public PacketSignal handle(ItemStackRequestPacket p) {
+            for (var r : p.getRequests()) {
+                System.out.println("[fake] item stack request " + r.getRequestId() + " actions=" + java.util.Arrays.toString(r.getActions()));
+                s.sendPacket(failure(r.getRequestId()));
+            }
+            return PacketSignal.HANDLED;
+        }
+
+        ItemStackResponsePacket failure(int id) {
+            ItemStackResponsePacket resp = new ItemStackResponsePacket();
+            resp.getEntries().add(new org.cloudburstmc.protocol.bedrock.data.inventory.itemstack.response.ItemStackResponse(false, id, new ArrayList<>()));
+            return resp;
         }
 
         @Override
