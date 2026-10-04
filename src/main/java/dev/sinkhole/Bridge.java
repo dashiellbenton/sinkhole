@@ -128,6 +128,13 @@ import java.util.concurrent.TimeUnit;
  * {@link BedrockUpstream}) on the other, with the packet translation in between.
  */
 public final class Bridge implements BedrockUpstream.Listener {
+    /**
+     * The 26.3 client reads the previous game mode as a VarInt where 0 means "none", but MCProtocolLib still writes
+     * null as the byte 0xff (a VarInt continuation byte, which shifts the rest of the packet). SURVIVAL is written as
+     * 0, which the client reads as "none".
+     */
+    private static final GameMode NO_PREVIOUS_MODE = GameMode.SURVIVAL;
+
     private static final boolean DEBUG = System.getenv("SINKHOLE_DEBUG") != null;
     private static final float EYE_HEIGHT = 1.62f;
 
@@ -462,7 +469,7 @@ public final class Bridge implements BedrockUpstream.Listener {
             default -> GameMode.SURVIVAL;
         };
         PlayerSpawnInfo spawn = new PlayerSpawnInfo(registries.idOf("minecraft:dimension_type", dimensionName), Key.key(dimensionName),
-                0L, mode, null, false, false, null, 0, 63);
+                0L, mode, NO_PREVIOUS_MODE, false, false, null, 0, 63);
         selfJavaId = sg.getRuntimeEntityId() > Integer.MAX_VALUE ? 1 : (int) sg.getRuntimeEntityId();
         client.send(new ClientboundLoginPacket(selfJavaId, false,
                 new Key[]{Key.key(dimensionName)}, 20, 8, 8, false, true, false, spawn, false, false));
@@ -759,7 +766,7 @@ public final class Bridge implements BedrockUpstream.Listener {
         currentDimension = dim;
         if (javaPlaying) {
             PlayerSpawnInfo spawn = new PlayerSpawnInfo(registries.idOf("minecraft:dimension_type", name), Key.key(name),
-                    0L, gameMode(start.getPlayerGameType()), null, false, false, null, 0, 63);
+                    0L, gameMode(start.getPlayerGameType()), NO_PREVIOUS_MODE, false, false, null, 0, 63);
             client.send(new ClientboundRespawnPacket(spawn, false, false));
             client.send(new ClientboundGameEventPacket(GameEvent.LEVEL_CHUNKS_LOAD_START, null));
             Vector3f pos = cd.getPosition();
