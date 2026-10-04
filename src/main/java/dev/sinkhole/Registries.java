@@ -82,6 +82,17 @@ public final class Registries {
         return new int[0];
     }
 
+    /** Bedrock biome id -> Java biome registry id (GeyserMC biomes mapping; the first Java biome wins on shared ids). */
+    public Map<Integer, Integer> bedrockBiomeIds() throws IOException {
+        Map<Integer, Integer> out = new HashMap<>();
+        try (java.io.Reader r = new java.io.InputStreamReader(Registries.class.getResourceAsStream("/data/bedrock_biomes.json"), java.nio.charset.StandardCharsets.UTF_8)) {
+            for (var e : com.google.gson.JsonParser.parseReader(r).getAsJsonObject().entrySet()) {
+                out.putIfAbsent(e.getValue().getAsJsonObject().get("bedrock_id").getAsInt(), idOf("minecraft:worldgen/biome", e.getKey()));
+            }
+        }
+        return out;
+    }
+
     /** Network id of an entry of a registry (its position in the packet), or 0. */
     public int idOf(String registry, String name) {
         NbtMap reg = codec.getCompound(registry);

@@ -22,10 +22,17 @@ public final class BedrockChunks {
 
     private final BlockMapper blocks;
     private final int plainsBiome;
+    /** Bedrock biome id -> Java biome registry id. */
+    private final java.util.Map<Integer, Integer> biomes;
 
-    public BedrockChunks(BlockMapper blocks, int plainsBiome) {
+    public BedrockChunks(BlockMapper blocks, int plainsBiome, java.util.Map<Integer, Integer> biomes) {
         this.blocks = blocks;
         this.plainsBiome = plainsBiome;
+        this.biomes = biomes;
+    }
+
+    private int javaBiome(int bedrockId) {
+        return biomes.getOrDefault(bedrockId, plainsBiome);
     }
 
     /**
@@ -37,45 +44,123 @@ public final class BedrockChunks {
      */
     public ClientboundLevelChunkWithLightPacket translate(int x, int z, ByteBuf data, int subChunks, int javaSections,
                                                           boolean hashed, int minSection) {
-        ChunkSection[] sections = new ChunkSection[javaSections];
-        for (int i = 0; i < javaSections; i++) {
+        ChunkSection[] sections = newSections(javaSections);
+        ByteBuf in = data.duplicate();
+        for (int i = 0; i < subChunks && in.isReadable(); i++) {
+            int index = i - minSection;
+            readSubChunk(in, index >= 0 && index < javaSections ? sections[index] : null);
+        }
+        readBiomes(in, subChunks, sections, minSection);
+        return build(x, z, sections, javaSections);
+    }
+
+    public ChunkSection[] newSections(int count) {
+        ChunkSection[] sections = new ChunkSection[count];
+        for (int i = 0; i < count; i++) {
             sections[i] = new ChunkSection(0, 0, DataPalette.createForBlockState(4, GLOBAL_BLOCK_BITS), DataPalette.createForBiome(1, GLOBAL_BIOME_BITS));
             sections[i].getBiomeData().set(0, 0, 0, plainsBiome);
         }
+        return sections;
+    }
 
-        ByteBuf in = data.duplicate();
-        for (int i = 0; i < subChunks && in.isReadable(); i++) {
-            int version = in.readUnsignedByte();
-            int layers = 1;
-            int index = i - minSection;
-            if (version == 8 || version == 9) {
-                layers = in.readUnsignedByte();
-                if (version == 9) {
-                    in.readByte(); // absolute sub-chunk index; sub-chunks arrive bottom-up so the position is enough
-                }
+    /** Reads one serialized sub-chunk (versions 1, 8, 9) into a Java section; {@code section} may be null to skip. */
+    public void readSubChunk(ByteBuf in, ChunkSection section) {
+        int version = in.readUnsignedByte();
+        int layers = 1;
+        if (version == 8 || version == 9) {
+            layers = in.readUnsignedByte();
+            if (version == 9) {
+                in.readByte(); // absolute sub-chunk index; sub-chunks arrive bottom-up so the position is enough
             }
-            int[] first = null;
-            for (int layer = 0; layer < layers; layer++) {
-                int[] ids = readStorage(in);
-                if (layer == 0) {
-                    first = ids;
-                }
+        }
+        int[] first = null;
+        for (int layer = 0; layer < layers; layer++) {
+            int[] ids = readStorage(in);
+            if (layer == 0) {
+                first = ids;
             }
-            if (first != null && index >= 0 && index < javaSections) {
-                ChunkSection section = sections[index];
-                for (int bx = 0; bx < 16; bx++) {
-                    for (int bz = 0; bz < 16; bz++) {
-                        for (int by = 0; by < 16; by++) {
-                            int java = first[(bx << 8) | (bz << 4) | by];
-                            if (java != 0) {
-                                section.setBlock(bx, by, bz, java);
-                            }
-                        }
+        }
+        if (first == null || section == null) {
+            return;
+        }
+        for (int bx = 0; bx < 16; bx++) {
+            for (int bz = 0; bz < 16; bz++) {
+                for (int by = 0; by < 16; by++) {
+                    int java = first[(bx << 8) | (bz << 4) | by];
+                    if (java != 0) {
+                        section.setBlock(bx, by, bz, java);
                     }
                 }
             }
         }
-        return build(x, z, sections, javaSections);
+    }
+
+    public ClientboundLevelChunkWithLightPacket assemble(int x, int z, ChunkSection[] sections) {
+        return build(x, z, sections, sections.length);
+    }
+
+    public void applyBiomes(ByteBuf in, int count, ChunkSection[] sections, int minSection) {
+        readBiomes(in.duplicate(), count, sections, minSection);
+    }
+
+    /** Bedrock stores one paletted 16x16x16 biome volume per sub-chunk; Java wants 4x4x4 per section. */
+    private void readBiomes(ByteBuf in, int count, ChunkSection[] sections, int minSection) {
+        int[] previous = null;
+        for (int i = 0; i < count && in.isReadable(); i++) {
+            int mark = in.getUnsignedByte(in.readerIndex());
+            int[] ids;
+            if (mark == 0xFF) {
+                in.readByte();
+                ids = previous;
+            } else {
+                ids = readRawStorage(in);
+            }
+            previous = ids;
+            int index = i - minSection;
+            if (ids == null || index < 0 || index >= sections.length) {
+                continue;
+            }
+            var data = sections[index].getBiomeData();
+            for (int bx = 0; bx < 4; bx++) {
+                for (int bz = 0; bz < 4; bz++) {
+                    for (int by = 0; by < 4; by++) {
+                        data.set(bx, by, bz, javaBiome(ids[((bx * 4) << 8) | ((bz * 4) << 4) | (by * 4)]));
+                    }
+                }
+            }
+        }
+    }
+
+    /** A block-storage-shaped palette whose entries are plain ids (no translation). */
+    private int[] readRawStorage(ByteBuf in) {
+        int header = in.readUnsignedByte();
+        int bits = header >> 1;
+        int[] indices = new int[4096];
+        if (bits > 0) {
+            int perWord = 32 / bits;
+            int words = (4096 + perWord - 1) / perWord;
+            int mask = (1 << bits) - 1;
+            for (int w = 0; w < words; w++) {
+                int word = in.readIntLE();
+                for (int j = 0; j < perWord; j++) {
+                    int i = w * perWord + j;
+                    if (i >= 4096) {
+                        break;
+                    }
+                    indices[i] = (word >>> (j * bits)) & mask;
+                }
+            }
+        }
+        int size = bits == 0 ? 1 : readZigZag(in);
+        int[] palette = new int[size];
+        for (int i = 0; i < size; i++) {
+            palette[i] = readZigZag(in);
+        }
+        int[] out = new int[4096];
+        for (int i = 0; i < 4096; i++) {
+            out[i] = palette[Math.min(indices[i], size - 1)];
+        }
+        return out;
     }
 
     /** Reads one block storage and returns, per block, the translated Java state id. */

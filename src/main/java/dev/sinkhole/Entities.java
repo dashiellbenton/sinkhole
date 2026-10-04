@@ -13,6 +13,23 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.Clie
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundRemoveEntitiesPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundRotateHeadPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundTeleportEntityPacket;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityEventType;
+import org.cloudburstmc.protocol.bedrock.packet.EntityEventPacket;
+import org.cloudburstmc.protocol.bedrock.packet.PlayerListPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.EntityEvent;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundPlayerInfoRemovePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundEntityEventPacket;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityDataMap;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityDataTypes;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityFlag;
+import org.cloudburstmc.protocol.bedrock.packet.AddItemEntityPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.EntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.MetadataTypes;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.Pose;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.BooleanEntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.ByteEntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.ObjectEntityMetadata;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEntityDataPacket;
 import org.cloudburstmc.protocol.bedrock.packet.AddEntityPacket;
 import org.cloudburstmc.protocol.bedrock.packet.AddPlayerPacket;
 import org.cloudburstmc.protocol.bedrock.packet.MoveEntityAbsolutePacket;
@@ -35,6 +52,7 @@ public final class Entities {
         final int javaId;
         final long unique;
         final boolean player;
+        UUID uuid;
         double x, y, z;
         float yaw, pitch, headYaw;
 
@@ -45,7 +63,7 @@ public final class Entities {
         }
     }
 
-    private final Session java;
+    private final Session client;
     private final Map<Long, Tracked> byRuntime = new HashMap<>();
     private final Map<Long, Long> runtimeByUnique = new HashMap<>();
     private final Map<Integer, Long> runtimeByJava = new HashMap<>();
@@ -54,7 +72,7 @@ public final class Entities {
     private final String rewriteFrom;
 
     public Entities(Session java, String gamertag, String javaName) {
-        this.java = java;
+        this.client = java;
         this.ownName = javaName;
         this.rewriteFrom = gamertag;
     }
@@ -75,10 +93,11 @@ public final class Entities {
 
     public void addPlayer(AddPlayerPacket p) {
         Tracked t = track(p.getRuntimeEntityId(), p.getUniqueEntityId(), true);
+        t.uuid = p.getUuid();
         String name = Bridge.rename(p.getUsername(), rewriteFrom, ownName);
         GameProfile profile = new GameProfile(p.getUuid(), name.length() > 16 ? name.substring(0, 16) : name);
         PlayerListEntry entry = new PlayerListEntry(p.getUuid(), profile, true, 0, GameMode.SURVIVAL, null, true, 0, null, 0, null, null);
-        java.send(new ClientboundPlayerInfoUpdatePacket(EnumSet.of(PlayerListEntryAction.ADD_PLAYER, PlayerListEntryAction.UPDATE_LISTED), new PlayerListEntry[]{entry}));
+        client.send(new ClientboundPlayerInfoUpdatePacket(EnumSet.of(PlayerListEntryAction.ADD_PLAYER, PlayerListEntryAction.UPDATE_LISTED), new PlayerListEntry[]{entry}));
         Vector3f pos = p.getPosition();
         t.x = pos.getX();
         t.y = pos.getY() - EYE_HEIGHT;
@@ -86,7 +105,8 @@ public final class Entities {
         t.pitch = p.getRotation().getX();
         t.yaw = p.getRotation().getY();
         t.headYaw = p.getRotation().getZ();
-        java.send(new ClientboundAddEntityPacket(t.javaId, p.getUuid(), EntityType.PLAYER, t.x, t.y, t.z, t.yaw, t.headYaw, t.pitch));
+        client.send(new ClientboundAddEntityPacket(t.javaId, p.getUuid(), EntityType.PLAYER, t.x, t.y, t.z, t.yaw, t.headYaw, t.pitch));
+        metadata(p.getRuntimeEntityId(), p.getMetadata());
     }
 
     public void addEntity(AddEntityPacket p) {
@@ -102,7 +122,61 @@ public final class Entities {
         t.pitch = p.getRotation().getX();
         t.yaw = p.getRotation().getY();
         t.headYaw = p.getHeadRotation();
-        java.send(new ClientboundAddEntityPacket(t.javaId, UUID.randomUUID(), type, t.x, t.y, t.z, t.yaw, t.headYaw, t.pitch));
+        client.send(new ClientboundAddEntityPacket(t.javaId, UUID.randomUUID(), type, t.x, t.y, t.z, t.yaw, t.headYaw, t.pitch));
+        metadata(p.getRuntimeEntityId(), p.getMetadata());
+    }
+
+    /** Dropped items: a Java item entity plus its item-stack metadata. */
+    public void addItem(AddItemEntityPacket p, Inventory inv) {
+        var stack = inv.toJava(p.getItemInHand());
+        if (stack == null) {
+            return;
+        }
+        Tracked t = track(p.getRuntimeEntityId(), p.getUniqueEntityId(), false);
+        Vector3f pos = p.getPosition();
+        t.x = pos.getX();
+        t.y = pos.getY();
+        t.z = pos.getZ();
+        client.send(new ClientboundAddEntityPacket(t.javaId, UUID.randomUUID(), EntityType.ITEM, t.x, t.y, t.z, 0f, 0f, 0f));
+        client.send(new ClientboundSetEntityDataPacket(t.javaId, new EntityMetadata<?, ?>[]{
+                new ObjectEntityMetadata<>(8, MetadataTypes.ITEM_STACK, stack)}));
+    }
+
+    /** Names, sneaking, sprinting, fire, invisibility. */
+    public void metadata(long runtimeId, EntityDataMap data) {
+        Tracked t = byRuntime.get(runtimeId);
+        if (t == null || data == null) {
+            return;
+        }
+        List<EntityMetadata<?, ?>> out = new java.util.ArrayList<>();
+        var flags = data.getFlags();
+        if (flags != null && !flags.isEmpty()) {
+            byte b = 0;
+            if (Boolean.TRUE.equals(flags.get(EntityFlag.ON_FIRE))) {
+                b |= 0x01;
+            }
+            if (Boolean.TRUE.equals(flags.get(EntityFlag.SNEAKING))) {
+                b |= 0x02;
+            }
+            if (Boolean.TRUE.equals(flags.get(EntityFlag.SPRINTING))) {
+                b |= 0x08;
+            }
+            if (Boolean.TRUE.equals(flags.get(EntityFlag.INVISIBLE))) {
+                b |= 0x20;
+            }
+            out.add(new ByteEntityMetadata(0, MetadataTypes.BYTE, b));
+            out.add(new ObjectEntityMetadata<>(6, MetadataTypes.POSE,
+                    Boolean.TRUE.equals(flags.get(EntityFlag.SNEAKING)) ? Pose.SNEAKING : Pose.STANDING));
+        }
+        CharSequence name = data.get(EntityDataTypes.NAME);
+        if (name != null && !name.toString().isEmpty() && !t.player) {
+            out.add(new ObjectEntityMetadata<>(2, MetadataTypes.OPTIONAL_COMPONENT,
+                    java.util.Optional.of(net.kyori.adventure.text.Component.text(Bridge.rename(name.toString(), rewriteFrom, ownName)))));
+            out.add(new BooleanEntityMetadata(3, MetadataTypes.BOOLEAN, true));
+        }
+        if (!out.isEmpty()) {
+            client.send(new ClientboundSetEntityDataPacket(t.javaId, out.toArray(new EntityMetadata<?, ?>[0])));
+        }
     }
 
     public void remove(RemoveEntityPacket p) {
@@ -113,7 +187,10 @@ public final class Entities {
         Tracked t = byRuntime.remove(runtime);
         if (t != null) {
             runtimeByJava.remove(t.javaId);
-            java.send(new ClientboundRemoveEntitiesPacket(new int[]{t.javaId}));
+            client.send(new ClientboundRemoveEntitiesPacket(new int[]{t.javaId}));
+            if (t.uuid != null) {
+                client.send(new ClientboundPlayerInfoRemovePacket(List.of(t.uuid)));
+            }
         }
     }
 
@@ -175,14 +252,54 @@ public final class Entities {
     }
 
     private void sendTeleport(Tracked t, boolean onGround) {
-        java.send(new ClientboundTeleportEntityPacket(t.javaId, Vector3d.from(t.x, t.y, t.z), Vector3d.ZERO, t.yaw, t.pitch, List.of(), onGround));
-        java.send(new ClientboundRotateHeadPacket(t.javaId, t.headYaw));
+        client.send(new ClientboundTeleportEntityPacket(t.javaId, Vector3d.from(t.x, t.y, t.z), Vector3d.ZERO, t.yaw, t.pitch, List.of(), onGround));
+        client.send(new ClientboundRotateHeadPacket(t.javaId, t.headYaw));
+    }
+
+    /** Hurt/death animations. */
+    public void event(EntityEventPacket e, long selfRuntime, int selfJavaId) {
+        int javaId;
+        if (e.getRuntimeEntityId() == selfRuntime) {
+            javaId = selfJavaId;
+        } else {
+            Tracked t = byRuntime.get(e.getRuntimeEntityId());
+            if (t == null) {
+                return;
+            }
+            javaId = t.javaId;
+        }
+        if (e.getType() == EntityEventType.HURT) {
+            client.send(new ClientboundEntityEventPacket(javaId, EntityEvent.LIVING_HURT));
+        } else if (e.getType() == EntityEventType.DEATH) {
+            client.send(new ClientboundEntityEventPacket(javaId, EntityEvent.LIVING_DEATH));
+        }
+    }
+
+    /** Tab list entries of other players. */
+    public void playerList(PlayerListPacket p) {
+        if (p.getAction() == PlayerListPacket.Action.ADD) {
+            List<PlayerListEntry> entries = new java.util.ArrayList<>();
+            for (PlayerListPacket.Entry e : p.getEntries()) {
+                String name = Bridge.rename(e.getName(), rewriteFrom, ownName);
+                entries.add(new PlayerListEntry(e.getUuid(), new GameProfile(e.getUuid(), name.length() > 16 ? name.substring(0, 16) : name),
+                        true, 0, GameMode.SURVIVAL, null, true, 0, null, 0, null, null));
+            }
+            if (!entries.isEmpty()) {
+                client.send(new ClientboundPlayerInfoUpdatePacket(EnumSet.of(PlayerListEntryAction.ADD_PLAYER, PlayerListEntryAction.UPDATE_LISTED), entries.toArray(new PlayerListEntry[0])));
+            }
+        } else {
+            List<UUID> uuids = new java.util.ArrayList<>();
+            p.getEntries().forEach(e -> uuids.add(e.getUuid()));
+            if (!uuids.isEmpty()) {
+                client.send(new ClientboundPlayerInfoRemovePacket(uuids));
+            }
+        }
     }
 
     public void clear() {
         if (!byRuntime.isEmpty()) {
             int[] ids = byRuntime.values().stream().mapToInt(t -> t.javaId).toArray();
-            java.send(new ClientboundRemoveEntitiesPacket(ids));
+            client.send(new ClientboundRemoveEntitiesPacket(ids));
         }
         byRuntime.clear();
         runtimeByUnique.clear();

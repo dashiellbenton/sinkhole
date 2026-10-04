@@ -194,9 +194,17 @@ public final class FakeBedrockServer {
                     lc.setChunkX(cx);
                     lc.setChunkZ(cz);
                     lc.setDimension(0);
-                    lc.setSubChunksLength(24);
                     lc.setCachingEnabled(false);
-                    lc.setData(chunkData());
+                    if (System.getenv("FAKE_SUBCHUNKS") != null) {
+                        lc.setRequestSubChunks(true);
+                        lc.setSubChunksLength(-1);
+                        ByteBuf biomes = Unpooled.buffer();
+                        writeBiomes(biomes);
+                        lc.setData(biomes);
+                    } else {
+                        lc.setSubChunksLength(24);
+                        lc.setData(chunkData());
+                    }
                     s.sendPacket(lc);
                 }
             }
@@ -210,6 +218,22 @@ public final class FakeBedrockServer {
         ByteBuf chunkData() {
             ByteBuf out = Unpooled.buffer();
             for (int sub = 0; sub < 24; sub++) {
+                writeSub(out, sub);
+            }
+            writeBiomes(out);
+            return out;
+        }
+
+        void writeBiomes(ByteBuf out) {
+            writeStorage(out, new int[4096], List.of(1));
+            for (int i = 1; i < 24; i++) {
+                out.writeByte(0xFF);
+            }
+            out.writeByte(0);
+        }
+
+        void writeSub(ByteBuf out, int sub) {
+            {
                 out.writeByte(9);
                 out.writeByte(1);
                 out.writeByte(sub - 4);
@@ -233,13 +257,26 @@ public final class FakeBedrockServer {
                 }
                 writeStorage(out, idx, pal);
             }
-            // biomes: one uniform palette then "copy previous" markers, then border
-            writeStorage(out, new int[4096], List.of(1));
-            for (int i = 1; i < 24; i++) {
-                out.writeByte(0xFF);
+        }
+
+        @Override
+        public PacketSignal handle(SubChunkRequestPacket p) {
+            SubChunkPacket r = new SubChunkPacket();
+            r.setDimension(0);
+            r.setCenterPosition(p.getSubChunkPosition());
+            for (Vector3i off : p.getPositionOffsets()) {
+                SubChunkData d = new SubChunkData();
+                d.setPosition(off);
+                d.setResult(SubChunkRequestResult.SUCCESS);
+                ByteBuf b = Unpooled.buffer();
+                writeSub(b, off.getY());
+                d.setData(b);
+                d.setHeightMapType(HeightMapDataType.NO_DATA);
+                d.setRenderHeightMapType(HeightMapDataType.NO_DATA);
+                r.getSubChunks().add(d);
             }
-            out.writeByte(0);
-            return out;
+            s.sendPacket(r);
+            return PacketSignal.HANDLED;
         }
 
         @Override

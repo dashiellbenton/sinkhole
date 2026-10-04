@@ -22,6 +22,9 @@ import org.cloudburstmc.protocol.bedrock.packet.DisconnectPacket;
 import org.cloudburstmc.protocol.bedrock.packet.LevelChunkPacket;
 import org.cloudburstmc.protocol.bedrock.packet.MovePlayerPacket;
 import org.cloudburstmc.protocol.bedrock.packet.NetworkChunkPublisherUpdatePacket;
+import org.cloudburstmc.protocol.bedrock.data.SubChunkData;
+import org.cloudburstmc.protocol.bedrock.packet.SubChunkPacket;
+import org.cloudburstmc.protocol.bedrock.packet.SubChunkRequestPacket;
 import org.cloudburstmc.protocol.bedrock.packet.PlayStatusPacket;
 import org.cloudburstmc.protocol.bedrock.packet.PlayerAuthInputPacket;
 import org.cloudburstmc.protocol.bedrock.packet.RequestChunkRadiusPacket;
@@ -37,6 +40,8 @@ import org.cloudburstmc.protocol.bedrock.data.inventory.ItemData;
 import org.cloudburstmc.protocol.bedrock.data.inventory.transaction.InventoryTransactionType;
 import org.cloudburstmc.protocol.bedrock.data.inventory.transaction.ItemUseTransaction;
 import org.cloudburstmc.protocol.bedrock.data.inventory.HandSlot;
+import org.cloudburstmc.protocol.bedrock.packet.AddItemEntityPacket;
+import org.cloudburstmc.protocol.bedrock.packet.SetEntityDataPacket;
 import org.cloudburstmc.protocol.bedrock.packet.AddEntityPacket;
 import org.cloudburstmc.protocol.bedrock.packet.AddPlayerPacket;
 import org.cloudburstmc.protocol.bedrock.packet.AnimatePacket;
@@ -58,6 +63,28 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.Serv
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerActionPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPunchPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemOnPacket;
+import org.cloudburstmc.protocol.bedrock.data.Ability;
+import org.cloudburstmc.protocol.bedrock.data.AbilityLayer;
+import org.cloudburstmc.protocol.bedrock.data.LevelEvent;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityEventType;
+import org.cloudburstmc.protocol.bedrock.packet.ChangeDimensionPacket;
+import org.cloudburstmc.protocol.bedrock.packet.CorrectPlayerMovePredictionPacket;
+import org.cloudburstmc.protocol.bedrock.packet.EntityEventPacket;
+import org.cloudburstmc.protocol.bedrock.packet.LevelEventPacket;
+import org.cloudburstmc.protocol.bedrock.packet.PlayerListPacket;
+import org.cloudburstmc.protocol.bedrock.packet.SetEntityMotionPacket;
+import org.cloudburstmc.protocol.bedrock.packet.SetPlayerGameTypePacket;
+import org.cloudburstmc.protocol.bedrock.packet.UpdateAbilitiesPacket;
+import org.cloudburstmc.protocol.bedrock.packet.UpdatePlayerGameTypePacket;
+import org.geysermc.mcprotocollib.protocol.data.game.level.ClockNetworkState;
+import org.geysermc.mcprotocollib.protocol.data.game.level.notify.RainStrengthValue;
+import org.geysermc.mcprotocollib.protocol.data.game.level.notify.ThunderStrengthValue;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundRespawnPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerAbilitiesPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetExperiencePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.ClientboundSetEntityMotionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundSetTimePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerAbilitiesPacket;
 import org.geysermc.mcprotocollib.network.Session;
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
@@ -136,7 +163,9 @@ public final class Bridge implements BedrockUpstream.Listener {
     private Inventory inventory;
 
     // Player state mirrored from Bedrock attributes
-    private float health = 20, hunger = 20, saturation = 5;
+    private float health = 20, hunger = 20, saturation = 5, xpProgress, xpLevel;
+    private int selfJavaId = 1;
+    private boolean startFlying, stopFlying;
     private final List<PlayerBlockActionData> pendingActions = new ArrayList<>();
     private boolean sneaking, sprinting, jumping, forward, backward, left, right;
 
@@ -268,9 +297,12 @@ public final class Bridge implements BedrockUpstream.Listener {
             }
         } else if (p instanceof LevelChunkPacket lc) {
             if (lc.isRequestSubChunks() || lc.getSubChunksLength() < 0) {
-                return; // sub-chunk request mode is not handled yet
+                requestSubChunks(lc);
+                return;
             }
             client.send(chunks.translate(lc.getChunkX(), lc.getChunkZ(), lc.getData(), lc.getSubChunksLength(), sections, start.isBlockNetworkIdsHashed(), 0));
+        } else if (p instanceof SubChunkPacket sc) {
+            receiveSubChunks(sc);
         } else if (p instanceof UpdateBlockPacket ub) {
             if (ub.getDataLayer() == 0 && javaPlaying) {
                 int rid = ub.getDefinition().getRuntimeId();
@@ -303,6 +335,10 @@ public final class Bridge implements BedrockUpstream.Listener {
             entities.addPlayer(ap);
         } else if (p instanceof AddEntityPacket ae) {
             entities.addEntity(ae);
+        } else if (p instanceof AddItemEntityPacket ai) {
+            entities.addItem(ai, inventory);
+        } else if (p instanceof SetEntityDataPacket sd) {
+            entities.metadata(sd.getRuntimeEntityId(), sd.getMetadata());
         } else if (p instanceof RemoveEntityPacket re) {
             entities.remove(re);
         } else if (p instanceof MoveEntityAbsolutePacket me) {
@@ -327,7 +363,44 @@ public final class Bridge implements BedrockUpstream.Listener {
                 client.send(inventory.javaContent());
             }
         } else if (p instanceof SetTimePacket st) {
-            // TODO: translate to the Java day cycle clock
+            if (javaPlaying) {
+                int clock = registries.idOf("minecraft:world_clock", "minecraft:overworld");
+                client.send(new ClientboundSetTimePacket(st.getTime(), java.util.Map.of(clock, new ClockNetworkState(st.getTime(), 0f, 1f))));
+            }
+        } else if (p instanceof SetEntityMotionPacket sm) {
+            if (start != null && sm.getRuntimeEntityId() == start.getRuntimeEntityId() && javaPlaying) {
+                Vector3f m = sm.getMotion();
+                client.send(new ClientboundSetEntityMotionPacket(selfJavaId, Vector3d.from(m.getX(), m.getY(), m.getZ())));
+            }
+        } else if (p instanceof EntityEventPacket ee) {
+            entities.event(ee, start == null ? -1 : start.getRuntimeEntityId(), selfJavaId);
+        } else if (p instanceof UpdatePlayerGameTypePacket gt) {
+            if (start != null && gt.getEntityId() == start.getUniqueEntityId() && javaPlaying) {
+                client.send(new ClientboundGameEventPacket(GameEvent.CHANGE_GAME_MODE, gameMode(gt.getGameType())));
+            }
+        } else if (p instanceof SetPlayerGameTypePacket gt) {
+            if (javaPlaying) {
+                client.send(new ClientboundGameEventPacket(GameEvent.CHANGE_GAME_MODE, switch (gt.getGamemode()) {
+                    case 1 -> GameMode.CREATIVE;
+                    case 2 -> GameMode.ADVENTURE;
+                    case 6 -> GameMode.SPECTATOR;
+                    default -> GameMode.SURVIVAL;
+                }));
+            }
+        } else if (p instanceof UpdateAbilitiesPacket ab) {
+            if (javaPlaying && start != null && ab.getUniqueEntityId() == start.getUniqueEntityId()) {
+                sendAbilities(ab);
+            }
+        } else if (p instanceof PlayerListPacket pl) {
+            entities.playerList(pl);
+        } else if (p instanceof CorrectPlayerMovePredictionPacket cp) {
+            if (javaPlaying) {
+                teleport(cp.getPosition().getX(), cp.getPosition().getY() - EYE_HEIGHT, cp.getPosition().getZ(), yaw, pitch);
+            }
+        } else if (p instanceof ChangeDimensionPacket cd) {
+            changeDimension(cd);
+        } else if (p instanceof LevelEventPacket le) {
+            weather(le);
         }
     }
 
@@ -365,7 +438,8 @@ public final class Bridge implements BedrockUpstream.Listener {
         };
         PlayerSpawnInfo spawn = new PlayerSpawnInfo(registries.idOf("minecraft:dimension_type", dimensionName), Key.key(dimensionName),
                 0L, mode, null, false, false, null, 0, 63);
-        client.send(new ClientboundLoginPacket(sg.getRuntimeEntityId() > Integer.MAX_VALUE ? 1 : (int) sg.getRuntimeEntityId(), false,
+        selfJavaId = sg.getRuntimeEntityId() > Integer.MAX_VALUE ? 1 : (int) sg.getRuntimeEntityId();
+        client.send(new ClientboundLoginPacket(selfJavaId, false,
                 new Key[]{Key.key(dimensionName)}, 20, 8, 8, false, true, false, spawn, false, false));
         javaPlaying = true;
         client.send(new ClientboundGameEventPacket(GameEvent.LEVEL_CHUNKS_LOAD_START, null));
@@ -427,6 +501,12 @@ public final class Bridge implements BedrockUpstream.Listener {
             jumping = in.isJump();
             sneaking = in.isShift();
             sprinting = in.isSprint();
+        } else if (p instanceof ServerboundPlayerAbilitiesPacket ab) {
+            if (ab.isFlying()) {
+                startFlying = true;
+            } else {
+                stopFlying = true;
+            }
         } else if (p instanceof ServerboundClientCommandPacket c) {
             if (c.getRequest() == ClientCommand.PERFORM_RESPAWN) {
                 RespawnPacket r = new RespawnPacket();
@@ -492,6 +572,14 @@ public final class Bridge implements BedrockUpstream.Listener {
         if (sprinting) {
             flags.add(PlayerAuthInputData.SPRINTING);
         }
+        if (startFlying) {
+            flags.add(PlayerAuthInputData.START_FLYING);
+            startFlying = false;
+        }
+        if (stopFlying) {
+            flags.add(PlayerAuthInputData.STOP_FLYING);
+            stopFlying = false;
+        }
         synchronized (pendingActions) {
             if (!pendingActions.isEmpty()) {
                 flags.add(PlayerAuthInputData.PERFORM_BLOCK_ACTIONS);
@@ -527,17 +615,150 @@ public final class Bridge implements BedrockUpstream.Listener {
 
     // ---------------------------------------------------------------- gameplay actions
 
+    private static GameMode gameMode(org.cloudburstmc.protocol.bedrock.data.GameType t) {
+        return switch (t) {
+            case CREATIVE, CREATIVE_VIEWER -> GameMode.CREATIVE;
+            case ADVENTURE -> GameMode.ADVENTURE;
+            case SURVIVAL_VIEWER -> GameMode.SPECTATOR;
+            default -> GameMode.SURVIVAL;
+        };
+    }
+
+    private void sendAbilities(UpdateAbilitiesPacket ab) {
+        boolean invulnerable = false, flying = false, mayFly = false, instabuild = false;
+        float fly = 0.05f, walk = 0.1f;
+        for (AbilityLayer layer : ab.getAbilityLayers()) {
+            if (layer.getLayerType() != AbilityLayer.Type.BASE) {
+                continue;
+            }
+            invulnerable = layer.getAbilityValues().contains(Ability.INVULNERABLE);
+            flying = layer.getAbilityValues().contains(Ability.FLYING);
+            mayFly = layer.getAbilityValues().contains(Ability.MAY_FLY);
+            instabuild = layer.getAbilityValues().contains(Ability.INSTABUILD);
+            fly = layer.getFlySpeed();
+            walk = layer.getWalkSpeed();
+        }
+        client.send(new ClientboundPlayerAbilitiesPacket(invulnerable, mayFly, flying, instabuild, fly, walk));
+    }
+
+    private void weather(LevelEventPacket le) {
+        if (!javaPlaying) {
+            return;
+        }
+        LevelEvent type = le.getType() instanceof LevelEvent e ? e : null;
+        if (type == LevelEvent.START_RAINING) {
+            client.send(new ClientboundGameEventPacket(GameEvent.START_RAINING, null));
+            client.send(new ClientboundGameEventPacket(GameEvent.RAIN_LEVEL_CHANGE, new RainStrengthValue(1f)));
+        } else if (type == LevelEvent.STOP_RAINING) {
+            client.send(new ClientboundGameEventPacket(GameEvent.STOP_RAINING, null));
+        } else if (type == LevelEvent.START_THUNDERSTORM) {
+            client.send(new ClientboundGameEventPacket(GameEvent.THUNDER_LEVEL_CHANGE, new ThunderStrengthValue(1f)));
+        } else if (type == LevelEvent.STOP_THUNDERSTORM) {
+            client.send(new ClientboundGameEventPacket(GameEvent.THUNDER_LEVEL_CHANGE, new ThunderStrengthValue(0f)));
+        }
+    }
+
+    /** A chunk whose sub-chunks are requested separately (newer servers). */
+    private static final class PendingChunk {
+        final int x, z, total;
+        final io.netty.buffer.ByteBuf biomes;
+        final org.geysermc.mcprotocollib.protocol.data.game.chunk.ChunkSection[] sections;
+        int received;
+
+        PendingChunk(int x, int z, int total, io.netty.buffer.ByteBuf biomes, org.geysermc.mcprotocollib.protocol.data.game.chunk.ChunkSection[] sections) {
+            this.x = x;
+            this.z = z;
+            this.total = total;
+            this.biomes = biomes;
+            this.sections = sections;
+        }
+    }
+
+    private final java.util.Map<Long, PendingChunk> pendingChunks = new java.util.HashMap<>();
+
+    private static long chunkKey(int x, int z) {
+        return ((long) x << 32) | (z & 0xFFFFFFFFL);
+    }
+
+    private void requestSubChunks(LevelChunkPacket lc) {
+        int count = lc.getSubChunkLimit() > 0 ? Math.min(lc.getSubChunkLimit(), sections) : sections;
+        int minIndex = currentDimension == 0 ? -4 : 0;
+        pendingChunks.put(chunkKey(lc.getChunkX(), lc.getChunkZ()),
+                new PendingChunk(lc.getChunkX(), lc.getChunkZ(), count, lc.getData().retainedDuplicate(), chunks.newSections(sections)));
+        SubChunkRequestPacket req = new SubChunkRequestPacket();
+        req.setDimension(currentDimension);
+        req.setSubChunkPosition(Vector3i.from(lc.getChunkX(), minIndex, lc.getChunkZ()));
+        List<Vector3i> offsets = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            offsets.add(Vector3i.from(0, i, 0));
+        }
+        req.setPositionOffsets(offsets);
+        upstream.send(req);
+    }
+
+    private void receiveSubChunks(SubChunkPacket sc) {
+        for (SubChunkData d : sc.getSubChunks()) {
+            Vector3i abs = sc.getCenterPosition().add(d.getPosition());
+            PendingChunk pc = pendingChunks.get(chunkKey(abs.getX(), abs.getZ()));
+            if (pc == null) {
+                continue;
+            }
+            int minIndex = currentDimension == 0 ? -4 : 0;
+            int index = abs.getY() - minIndex;
+            if (d.getResult() == org.cloudburstmc.protocol.bedrock.data.SubChunkRequestResult.SUCCESS && d.getData() != null
+                    && index >= 0 && index < pc.sections.length) {
+                chunks.readSubChunk(d.getData().duplicate(), pc.sections[index]);
+            }
+            if (++pc.received >= pc.total) {
+                pendingChunks.remove(chunkKey(pc.x, pc.z));
+                chunks.applyBiomes(pc.biomes, pc.total, pc.sections, 0);
+                pc.biomes.release();
+                client.send(chunks.assemble(pc.x, pc.z, pc.sections));
+            }
+        }
+    }
+
+    private void changeDimension(ChangeDimensionPacket cd) {
+        int dim = cd.getDimension();
+        sections = dim == 0 ? 24 : 16;
+        String name = switch (dim) {
+            case 1 -> "minecraft:the_nether";
+            case 2 -> "minecraft:the_end";
+            default -> "minecraft:overworld";
+        };
+        entities.clear();
+        currentDimension = dim;
+        if (javaPlaying) {
+            PlayerSpawnInfo spawn = new PlayerSpawnInfo(registries.idOf("minecraft:dimension_type", name), Key.key(name),
+                    0L, gameMode(start.getPlayerGameType()), null, false, false, null, 0, 63);
+            client.send(new ClientboundRespawnPacket(spawn, false, false));
+            client.send(new ClientboundGameEventPacket(GameEvent.LEVEL_CHUNKS_LOAD_START, null));
+            Vector3f pos = cd.getPosition();
+            teleport(pos.getX(), pos.getY() - EYE_HEIGHT, pos.getZ(), yaw, pitch);
+        }
+        // tell the Bedrock server the dimension change finished
+        PlayerBlockActionData done = new PlayerBlockActionData();
+        done.setAction(PlayerActionType.DIMENSION_CHANGE_SUCCESS);
+        done.setBlockPosition(org.cloudburstmc.math.vector.Vector3i.ZERO);
+        queue(done);
+    }
+
+    private int currentDimension;
+
     private void updateAttributes(UpdateAttributesPacket ua) {
         for (AttributeData a : ua.getAttributes()) {
             switch (a.getName()) {
                 case "minecraft:health" -> health = a.getValue();
                 case "minecraft:player.hunger" -> hunger = a.getValue();
                 case "minecraft:player.saturation" -> saturation = a.getValue();
+                case "minecraft:player.experience" -> xpProgress = a.getValue();
+                case "minecraft:player.level" -> xpLevel = a.getValue();
                 default -> { }
             }
         }
         if (javaPlaying) {
             client.send(new ClientboundSetHealthPacket(health, (int) Math.ceil(hunger), saturation));
+            client.send(new ClientboundSetExperiencePacket(xpProgress, (int) xpLevel, 0));
         }
     }
 
