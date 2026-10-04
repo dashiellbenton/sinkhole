@@ -69,7 +69,8 @@ public final class BedrockCodecs {
             UpdatePlayerGameTypePacket.class, SetPlayerGameTypePacket.class, UpdateAbilitiesPacket.class,
             PlayerListPacket.class, CorrectPlayerMovePredictionPacket.class, ChangeDimensionPacket.class,
             LevelEventPacket.class, AddItemEntityPacket.class, SetEntityDataPacket.class, SubChunkPacket.class,
-            SubChunkRequestPacket.class,
+            SubChunkRequestPacket.class, ResourcePackDataInfoPacket.class, ResourcePackChunkDataPacket.class,
+            ResourcePackChunkRequestPacket.class,
             // serverbound: what we send must still be encodable
             RequestNetworkSettingsPacket.class, LoginPacket.class, ClientToServerHandshakePacket.class,
             ResourcePackClientResponsePacket.class, ClientCacheStatusPacket.class, RequestChunkRadiusPacket.class,

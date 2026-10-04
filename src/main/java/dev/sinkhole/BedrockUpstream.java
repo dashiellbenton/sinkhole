@@ -20,6 +20,9 @@ import org.cloudburstmc.protocol.bedrock.data.definitions.BlockDefinition;
 import org.cloudburstmc.protocol.bedrock.data.definitions.ItemDefinition;
 import org.cloudburstmc.protocol.common.DefinitionRegistry;
 import org.cloudburstmc.protocol.common.SimpleDefinitionRegistry;
+import org.cloudburstmc.protocol.bedrock.packet.ResourcePackChunkDataPacket;
+import org.cloudburstmc.protocol.bedrock.packet.ResourcePackChunkRequestPacket;
+import org.cloudburstmc.protocol.bedrock.packet.ResourcePackDataInfoPacket;
 import org.cloudburstmc.protocol.bedrock.packet.ResourcePackClientResponsePacket;
 import org.cloudburstmc.protocol.bedrock.packet.ResourcePackStackPacket;
 import org.cloudburstmc.protocol.bedrock.packet.ResourcePacksInfoPacket;
@@ -32,6 +35,7 @@ import javax.crypto.SecretKey;
 import java.net.InetSocketAddress;
 import java.security.PublicKey;
 import java.util.Base64;
+import java.util.UUID;
 
 /**
  * Our connection to the real Bedrock server, behaving like a Bedrock game client. Handles the login, encryption and
@@ -142,7 +146,8 @@ public final class BedrockUpstream implements BedrockPacketHandler {
             System.out.println("[debug] bedrock server -> proxy: " + packet.getClass().getSimpleName());
         }
         if (packet instanceof NetworkSettingsPacket || packet instanceof ServerToClientHandshakePacket
-                || packet instanceof ResourcePacksInfoPacket || packet instanceof ResourcePackStackPacket) {
+                || packet instanceof ResourcePacksInfoPacket || packet instanceof ResourcePackStackPacket
+                || packet instanceof ResourcePackDataInfoPacket || packet instanceof ResourcePackChunkDataPacket) {
             return packet.handle(this); // the handle(...) methods below
         }
         if (packet instanceof StartGamePacket sg) {
@@ -188,13 +193,61 @@ public final class BedrockUpstream implements BedrockPacketHandler {
         return PacketSignal.HANDLED;
     }
 
+    // Resource packs: the server's packs are downloaded (and thrown away) so that servers which require them accept us.
+    private final java.util.Map<UUID, Long> packChunks = new java.util.LinkedHashMap<>();
+    private final java.util.Set<UUID> packsPending = new java.util.HashSet<>();
+
     @Override
     public PacketSignal handle(ResourcePacksInfoPacket packet) {
-        // Packs are not downloaded; claim to have everything. Servers that force packs may refuse this.
+        java.util.List<String> wanted = new java.util.ArrayList<>();
+        java.util.List<ResourcePacksInfoPacket.Entry> all = new java.util.ArrayList<>(packet.getResourcePackInfos());
+        all.addAll(packet.getBehaviorPackInfos());
+        for (ResourcePacksInfoPacket.Entry e : all) {
+            if (e.getCdnUrl() == null || e.getCdnUrl().isEmpty()) {
+                wanted.add(e.getPackId() + "_" + e.getPackVersion());
+                packsPending.add(e.getPackId());
+            }
+        }
         ResourcePackClientResponsePacket r = new ResourcePackClientResponsePacket();
-        r.setStatus(ResourcePackClientResponsePacket.Status.HAVE_ALL_PACKS);
+        if (wanted.isEmpty()) {
+            r.setStatus(ResourcePackClientResponsePacket.Status.HAVE_ALL_PACKS);
+        } else {
+            r.setStatus(ResourcePackClientResponsePacket.Status.SEND_PACKS);
+            r.getPackIds().addAll(wanted);
+        }
         session.sendPacket(r);
         return PacketSignal.HANDLED;
+    }
+
+    @Override
+    public PacketSignal handle(ResourcePackDataInfoPacket packet) {
+        packChunks.put(packet.getPackId(), packet.getChunkCount());
+        requestChunk(packet.getPackId(), packet.getPackVersion(), 0);
+        return PacketSignal.HANDLED;
+    }
+
+    @Override
+    public PacketSignal handle(ResourcePackChunkDataPacket packet) {
+        long count = packChunks.getOrDefault(packet.getPackId(), 0L);
+        if (packet.getChunkIndex() + 1 < count) {
+            requestChunk(packet.getPackId(), packet.getPackVersion(), packet.getChunkIndex() + 1);
+        } else {
+            packsPending.remove(packet.getPackId());
+            if (packsPending.isEmpty()) {
+                ResourcePackClientResponsePacket r = new ResourcePackClientResponsePacket();
+                r.setStatus(ResourcePackClientResponsePacket.Status.HAVE_ALL_PACKS);
+                session.sendPacket(r);
+            }
+        }
+        return PacketSignal.HANDLED;
+    }
+
+    private void requestChunk(UUID pack, String version, int index) {
+        ResourcePackChunkRequestPacket req = new ResourcePackChunkRequestPacket();
+        req.setPackId(pack);
+        req.setPackVersion(version);
+        req.setChunkIndex(index);
+        session.sendPacket(req);
     }
 
     @Override
