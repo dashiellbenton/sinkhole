@@ -150,6 +150,9 @@
                     <exclude>META-INF/*.DSA</exclude>
                     <exclude>META-INF/*.RSA</exclude>
                     <exclude>module-info.class</exclude>
+                    <!-- netty native transports Sinkhole never uses (QUIC, io_uring): ~30 MB -->
+                    <exclude>META-INF/native/*quiche*</exclude>
+                    <exclude>META-INF/native/*io_uring*</exclude>
                   </excludes>
                 </filter>
               </filters>
