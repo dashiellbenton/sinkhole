@@ -30,6 +30,7 @@ import java.util.UUID;
  * A tiny stand-in Bedrock server (accepts any login, serves a flat stone/grass world) used to test the proxy end to
  * end without a real server. Usage: FakeBedrockServer [port]
  */
+@SuppressWarnings("deprecation")
 public final class FakeBedrockServer {
     static final int[] WIDTHS = {1, 2, 3, 4, 5, 6, 8, 16};
 

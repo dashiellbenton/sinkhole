@@ -59,6 +59,36 @@
       <artifactId>adventure-text-serializer-plain</artifactId>
       <version>5.2.0</version>
     </dependency>
+    <!-- NetherNet (Bedrock's WebRTC transport) -->
+    <dependency>
+      <groupId>dev.onvoid.webrtc</groupId>
+      <artifactId>webrtc-java</artifactId>
+      <version>0.19.0</version>
+    </dependency>
+    <dependency>
+      <groupId>dev.onvoid.webrtc</groupId>
+      <artifactId>webrtc-java</artifactId>
+      <version>0.19.0</version>
+      <classifier>windows-x86_64</classifier>
+    </dependency>
+    <dependency>
+      <groupId>dev.onvoid.webrtc</groupId>
+      <artifactId>webrtc-java</artifactId>
+      <version>0.19.0</version>
+      <classifier>linux-x86_64</classifier>
+    </dependency>
+    <dependency>
+      <groupId>dev.onvoid.webrtc</groupId>
+      <artifactId>webrtc-java</artifactId>
+      <version>0.19.0</version>
+      <classifier>macos-x86_64</classifier>
+    </dependency>
+    <dependency>
+      <groupId>dev.onvoid.webrtc</groupId>
+      <artifactId>webrtc-java</artifactId>
+      <version>0.19.0</version>
+      <classifier>macos-aarch64</classifier>
+    </dependency>
     <dependency>
       <groupId>org.yaml</groupId>
       <artifactId>snakeyaml</artifactId>

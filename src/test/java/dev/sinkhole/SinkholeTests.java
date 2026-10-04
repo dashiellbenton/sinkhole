@@ -25,11 +25,13 @@ class SinkholeTests {
         SinkholeConfig.writeDefault(file);
         SinkholeConfig c = SinkholeConfig.load(file);
         assertEquals(35653, c.port);
+        assertEquals("auto", c.transport);
         assertFalse(c.hasServer(), "server has no default");
 
-        Files.writeString(file, "port: 1234\nserver: \"play.example.net:19133\"\n");
+        Files.writeString(file, "port: 1234\ntransport: NetherNet\nserver: \"play.example.net:19133\"\n");
         c = SinkholeConfig.load(file);
         assertEquals(1234, c.port);
+        assertEquals("nethernet", c.transport);
         assertEquals("play.example.net", c.serverHost());
         assertEquals(19133, c.serverPort());
 
@@ -113,5 +115,53 @@ class SinkholeTests {
         ChunkSection first = MinecraftTypes.readChunkSection(in, 7, 16);
         assertEquals(1, first.getBlock(5, 0, 7), "stone at the bottom");
         assertEquals(0, first.getBlock(5, 1, 7), "air above it");
+    }
+
+    @Test
+    void loginJsonMatchesWhatClientsSend() throws Exception {
+        AuthService auth = new AuthService(Path.of("unused.json"), "1.26.50");
+        auth.useOffline("Tester");
+        AuthService.Identity id = auth.identity();
+        var payload = id.payload();
+        var m = payload.getClass().getDeclaredMethod("json");
+        m.setAccessible(true);
+        var json = com.google.gson.JsonParser.parseString((String) m.invoke(payload)).getAsJsonObject();
+        assertEquals(2, json.get("AuthenticationType").getAsInt(), "self-signed");
+        assertEquals("{\"chain\":[\"\"]}", json.get("Certificate").getAsString());
+        String[] token = json.get("Token").getAsString().split("\\.");
+        assertEquals(3, token.length);
+        var claims = com.google.gson.JsonParser.parseString(new String(java.util.Base64.getUrlDecoder().decode(token[1]))).getAsJsonObject();
+        assertEquals("Tester", claims.get("xname").getAsString());
+        assertEquals(java.util.Base64.getEncoder().encodeToString(id.key().getPublic().getEncoded()), claims.get("cpk").getAsString());
+        // client data: the device id must be 32 lowercase hex characters for Windows
+        var data = com.google.gson.JsonParser.parseString(ClientData.payload(id, "127.0.0.1:19132", "1.26.50")).getAsJsonObject();
+        assertTrue(data.get("DeviceId").getAsString().matches("[0-9a-f]{32}") || id.deviceOs() != 7);
+    }
+
+    @Test
+    void nethernetFramingHasNoFrameId() {
+        var channel = new io.netty.channel.embedded.EmbeddedChannel(new NetherNetFraming());
+        ByteBuf wire = Unpooled.wrappedBuffer(new byte[]{0x01, 0x02, 0x03});
+        assertTrue(channel.writeInbound(wire));
+        org.cloudburstmc.protocol.bedrock.netty.BedrockBatchWrapper batch = channel.readInbound();
+        assertEquals(3, batch.getCompressed().readableBytes(), "the message is the batch itself");
+        batch.release();
+        channel.finishAndReleaseAll();
+    }
+
+    @Test
+    void identityAssertionIsAddedToTheOffer() throws Exception {
+        var key = org.cloudburstmc.protocol.bedrock.util.EncryptionUtils.createKeyPair();
+        String sdp = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n"
+                + "a=fingerprint:sha-256 AA:BB:CC\r\n";
+        String out = NetherNetIdentity.assertion(key, null, NetherNetIdentity.DEFAULT_DOMAIN).apply(sdp);
+        int identity = out.indexOf("a=identity:");
+        assertTrue(identity > 0 && identity < out.indexOf("m=application"), "session-level attribute before the media section");
+        String b64 = out.substring(identity + "a=identity:".length(), out.indexOf("\r\n", identity));
+        var json = com.google.gson.JsonParser.parseString(new String(java.util.Base64.getDecoder().decode(b64))).getAsJsonObject();
+        assertEquals("default", json.getAsJsonObject("idp").get("protocol").getAsString());
+        var assertion = com.google.gson.JsonParser.parseString(json.get("assertion").getAsString()).getAsJsonObject();
+        assertTrue(assertion.get("fingerprints").getAsString().contains(".."), "detached JWS");
+        assertEquals(3, assertion.get("token").getAsString().split("\\.").length);
     }
 }
