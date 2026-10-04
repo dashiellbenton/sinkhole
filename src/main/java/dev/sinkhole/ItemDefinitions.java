@@ -24,7 +24,7 @@ final class ItemDefinitions {
             List<ItemDefinition> out = new ArrayList<>(array.size());
             for (JsonElement e : array) {
                 var o = e.getAsJsonObject();
-                out.add(new SimpleItemDefinition(o.get("name").getAsString(), o.get("id").getAsInt(), o.get("componentBased").getAsBoolean()));
+                out.add(new SimpleItemDefinition(o.get("name").getAsString(), o.get("id").getAsInt(), org.cloudburstmc.protocol.bedrock.data.inventory.ItemVersion.from(o.get("version").getAsInt()), o.get("componentBased").getAsBoolean(), org.cloudburstmc.nbt.NbtMap.EMPTY));
             }
             return out;
         } catch (IOException e) {

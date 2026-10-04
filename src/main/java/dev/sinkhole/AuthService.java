@@ -96,8 +96,9 @@ public final class AuthService {
             String pub = Base64.getEncoder().encodeToString(kp.getPublic().getEncoded());
             long now = System.currentTimeMillis() / 1000;
             UUID uuid = UUID.nameUUIDFromBytes(("Sinkhole:" + offlineName).getBytes());
-            String jwt = Jwts.sign(kp, pub, "{\"identityPublicKey\":\"" + pub + "\",\"nbf\":" + (now - 60) + ",\"exp\":" + (now + 86400)
-                    + ",\"extraData\":{\"displayName\":\"" + offlineName + "\",\"identity\":\"" + uuid + "\",\"XUID\":\"\"}}");
+            String jwt = Jwts.sign(kp, pub, "{\"identityPublicKey\":\"" + pub + "\",\"iss\":\"self\",\"randomNonce\":" + System.nanoTime()
+                    + ",\"iat\":" + now + ",\"nbf\":" + (now - 60) + ",\"exp\":" + (now + 86400)
+                    + ",\"extraData\":{\"displayName\":\"" + offlineName + "\",\"identity\":\"" + uuid + "\",\"XUID\":\"0\",\"titleId\":\"896928775\"}}");
             return new Identity(offlineName, "", uuid, List.of(jwt), AuthType.SELF_SIGNED, kp);
         } catch (Exception e) {
             throw new IllegalStateException(e);

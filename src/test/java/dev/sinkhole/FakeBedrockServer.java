@@ -144,7 +144,18 @@ public final class FakeBedrockServer {
             sg.setServerEngine("");
             sg.setBlockNetworkIdsHashed(true);
             sg.setBlockPalette(new org.cloudburstmc.nbt.NbtList<>(NbtType.COMPOUND, new ArrayList<NbtMap>()));
-            sg.setItemDefinitions(new ArrayList<>());
+            var defs = ItemDefinitions.load();
+            s.getPeer().getCodecHelper().setItemDefinitions(org.cloudburstmc.protocol.common.SimpleDefinitionRegistry
+                    .<org.cloudburstmc.protocol.bedrock.data.definitions.ItemDefinition>builder().addAll(defs).build());
+            s.getPeer().getCodecHelper().setBlockDefinitions(new org.cloudburstmc.protocol.common.DefinitionRegistry<org.cloudburstmc.protocol.bedrock.data.definitions.BlockDefinition>() {
+                public org.cloudburstmc.protocol.bedrock.data.definitions.BlockDefinition getDefinition(int id) {
+                    return () -> id;
+                }
+
+                public boolean isRegistered(org.cloudburstmc.protocol.bedrock.data.definitions.BlockDefinition d) {
+                    return true;
+                }
+            });
             sg.setPlayerPropertyData(NbtMap.EMPTY);
             sg.setWorldId("");
             sg.setScenarioId("");
@@ -162,6 +173,9 @@ public final class FakeBedrockServer {
             sg.setWorldTemplateId(UUID.randomUUID());
             sg.setServerChunkTickRange(4);
             s.sendPacket(sg);
+            ItemComponentPacket ic = new ItemComponentPacket();
+            ic.getItems().addAll(defs);
+            s.sendPacket(ic);
         }
 
         @Override
@@ -239,11 +253,48 @@ public final class FakeBedrockServer {
             t.setPlatformChatId("");
             t.setMessage("Welcome BedrockGuy! (from the fake server)");
             s.sendPacket(t);
+
+            UpdateAttributesPacket ua = new UpdateAttributesPacket();
+            ua.setRuntimeEntityId(1);
+            ua.setAttributes(List.of(new AttributeData("minecraft:health", 0, 20, 14), new AttributeData("minecraft:player.hunger", 0, 20, 17)));
+            s.sendPacket(ua);
+
+            var helper = s.getPeer().getCodecHelper();
+            InventoryContentPacket inv = new InventoryContentPacket();
+            inv.setContainerId(0);
+            List<org.cloudburstmc.protocol.bedrock.data.inventory.ItemData> items = new ArrayList<>();
+            for (int i = 0; i < 36; i++) {
+                items.add(org.cloudburstmc.protocol.bedrock.data.inventory.ItemData.AIR);
+            }
+            items.set(0, org.cloudburstmc.protocol.bedrock.data.inventory.ItemData.builder()
+                    .definition(ItemDefinitions.load().stream().filter(d -> d.getIdentifier().equals("minecraft:diamond_sword")).findFirst().orElseThrow()).count(1).build());
+            inv.setContents(items);
+            inv.setContainerNameData(new org.cloudburstmc.protocol.bedrock.data.inventory.FullContainerName(
+                    org.cloudburstmc.protocol.bedrock.data.inventory.ContainerSlotType.INVENTORY, null));
+            s.sendPacket(inv);
+
+            AddEntityPacket z = new AddEntityPacket();
+            z.setUniqueEntityId(77);
+            z.setRuntimeEntityId(77);
+            z.setIdentifier("minecraft:zombie");
+            z.setPosition(Vector3f.from(11, -52, 8));
+            z.setMotion(Vector3f.ZERO);
+            z.setRotation(Vector2f.ZERO);
+            s.sendPacket(z);
+            return PacketSignal.HANDLED;
+        }
+
+        @Override
+        public PacketSignal handle(InventoryTransactionPacket p) {
+            System.out.println("[fake] transaction " + p.getTransactionType() + " action=" + p.getActionType() + " entity=" + p.getRuntimeEntityId());
             return PacketSignal.HANDLED;
         }
 
         @Override
         public PacketSignal handle(PlayerAuthInputPacket p) {
+            if (!p.getPlayerActions().isEmpty() || p.getItemUseTransaction() != null) {
+                System.out.println("[fake] actions=" + p.getPlayerActions() + " itemUse=" + (p.getItemUseTransaction() != null));
+            }
             if (++inputs % 40 == 1) {
                 System.out.println("[fake] input #" + inputs + " pos=" + p.getPosition());
             }

@@ -34,7 +34,7 @@ public final class Main {
         Registries registries = new Registries();
         BlockMapper blocks = new BlockMapper();
         BedrockChunks chunks = new BedrockChunks(blocks, registries.idOf("minecraft:worldgen/biome", "minecraft:plains"));
-        JavaFrontend frontend = new JavaFrontend(config, auth, registries, chunks);
+        JavaFrontend frontend = new JavaFrontend(config, auth, registries, chunks, new GameData());
         frontend.start();
         System.out.println("[Sinkhole] Join with Minecraft Java at " + config.bindAddress + ":" + config.port
                 + "  ->  Bedrock server " + config.serverHost() + ":" + config.serverPort());

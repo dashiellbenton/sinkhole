@@ -30,6 +30,34 @@ import org.cloudburstmc.protocol.bedrock.packet.SetTimePacket;
 import org.cloudburstmc.protocol.bedrock.packet.StartGamePacket;
 import org.cloudburstmc.protocol.bedrock.packet.TextPacket;
 import org.cloudburstmc.protocol.bedrock.packet.UpdateBlockPacket;
+import org.cloudburstmc.protocol.bedrock.data.PlayerActionType;
+import org.cloudburstmc.protocol.bedrock.data.PlayerBlockActionData;
+import org.cloudburstmc.protocol.bedrock.data.AttributeData;
+import org.cloudburstmc.protocol.bedrock.data.inventory.ItemData;
+import org.cloudburstmc.protocol.bedrock.data.inventory.transaction.InventoryTransactionType;
+import org.cloudburstmc.protocol.bedrock.data.inventory.transaction.ItemUseTransaction;
+import org.cloudburstmc.protocol.bedrock.data.inventory.HandSlot;
+import org.cloudburstmc.protocol.bedrock.packet.AddEntityPacket;
+import org.cloudburstmc.protocol.bedrock.packet.AddPlayerPacket;
+import org.cloudburstmc.protocol.bedrock.packet.AnimatePacket;
+import org.cloudburstmc.protocol.bedrock.packet.InventoryContentPacket;
+import org.cloudburstmc.protocol.bedrock.packet.InventorySlotPacket;
+import org.cloudburstmc.protocol.bedrock.packet.InventoryTransactionPacket;
+import org.cloudburstmc.protocol.bedrock.packet.MobEquipmentPacket;
+import org.cloudburstmc.protocol.bedrock.packet.MoveEntityAbsolutePacket;
+import org.cloudburstmc.protocol.bedrock.packet.MoveEntityDeltaPacket;
+import org.cloudburstmc.protocol.bedrock.packet.RemoveEntityPacket;
+import org.cloudburstmc.protocol.bedrock.packet.RespawnPacket;
+import org.cloudburstmc.protocol.bedrock.packet.UpdateAttributesPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.ClientCommand;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundSetHealthPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientCommandPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSetCarriedItemPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundPlayerInputPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundAttackPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerActionPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemOnPacket;
 import org.geysermc.mcprotocollib.network.Session;
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
@@ -55,7 +83,9 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.Serv
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerRotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerStatusOnlyPacket;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -73,6 +103,7 @@ public final class Bridge implements BedrockUpstream.Listener {
     private final AuthService auth;
     private final Registries registries;
     private final BedrockChunks chunks;
+    private final GameData gameData;
     private final Session client;
     private final String javaName;
     private final ScheduledExecutorService ticker = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -100,8 +131,17 @@ public final class Bridge implements BedrockUpstream.Listener {
     private boolean sentInitialized;
 
     private String gamertag;
+    private Entities entities;
+    private Inventory inventory;
 
-    public Bridge(SinkholeConfig config, AuthService auth, Registries registries, BedrockChunks chunks, Session client) {
+    // Player state mirrored from Bedrock attributes
+    private float health = 20, hunger = 20, saturation = 5;
+    private final List<PlayerBlockActionData> pendingActions = new ArrayList<>();
+    private ItemUseTransaction pendingItemUse;
+    private boolean sneaking, sprinting, jumping, forward, backward, left, right;
+
+    public Bridge(SinkholeConfig config, AuthService auth, Registries registries, BedrockChunks chunks, GameData gameData, Session client) {
+        this.gameData = gameData;
         this.config = config;
         this.auth = auth;
         this.registries = registries;
@@ -145,6 +185,8 @@ public final class Bridge implements BedrockUpstream.Listener {
         try {
             AuthService.Identity id = auth.identity();
             gamertag = id.gamertag();
+            entities = new Entities(client, gamertag, javaName);
+            inventory = new Inventory(gameData);
             upstream = new BedrockUpstream(id, config.serverHost(), config.serverPort(), this);
             upstream.connect();
         } catch (Exception e) {
@@ -235,7 +277,9 @@ public final class Bridge implements BedrockUpstream.Listener {
                 client.send(new ClientboundBlockUpdatePacket(new BlockChangeEntry(ub.getBlockPosition(), state)));
             }
         } else if (p instanceof MovePlayerPacket mp) {
-            if (start != null && mp.getRuntimeEntityId() == start.getRuntimeEntityId() && javaPlaying) {
+            if (start != null && mp.getRuntimeEntityId() != start.getRuntimeEntityId()) {
+                entities.move(mp);
+            } else if (start != null && javaPlaying) {
                 teleport(mp.getPosition().getX(), mp.getPosition().getY() - EYE_HEIGHT, mp.getPosition().getZ(), mp.getRotation().getY(), mp.getRotation().getX());
             }
         } else if (p instanceof TextPacket t) {
@@ -254,6 +298,33 @@ public final class Bridge implements BedrockUpstream.Listener {
                     ? "Disconnected by the Bedrock server (" + d.getReason() + ")" : d.getKickMessage();
             System.out.println("[Sinkhole] Bedrock server kicked us: " + msg);
             client.disconnect(msg);
+        } else if (p instanceof AddPlayerPacket ap) {
+            entities.addPlayer(ap);
+        } else if (p instanceof AddEntityPacket ae) {
+            entities.addEntity(ae);
+        } else if (p instanceof RemoveEntityPacket re) {
+            entities.remove(re);
+        } else if (p instanceof MoveEntityAbsolutePacket me) {
+            entities.move(me);
+        } else if (p instanceof MoveEntityDeltaPacket md) {
+            entities.move(md);
+        } else if (p instanceof UpdateAttributesPacket ua) {
+            if (start != null && ua.getRuntimeEntityId() == start.getRuntimeEntityId()) {
+                updateAttributes(ua);
+            }
+        } else if (p instanceof InventoryContentPacket ic) {
+            if (DEBUG) {
+                System.out.println("[debug] inventory content container=" + ic.getContainerId() + " items=" + ic.getContents().size() + " first=" + (ic.getContents().isEmpty() ? null : ic.getContents().get(0)));
+            }
+            inventory.content(ic);
+            if (javaPlaying) {
+                client.send(inventory.javaContent());
+            }
+        } else if (p instanceof InventorySlotPacket is) {
+            inventory.slot(is);
+            if (javaPlaying) {
+                client.send(inventory.javaContent());
+            }
         } else if (p instanceof SetTimePacket st) {
             // TODO: translate to the Java day cycle clock
         }
@@ -330,6 +401,32 @@ public final class Bridge implements BedrockUpstream.Listener {
             move(x, y, z, m.getYaw(), m.getPitch(), m.isOnGround());
         } else if (p instanceof ServerboundMovePlayerStatusOnlyPacket m) {
             onGround = m.isOnGround();
+        } else if (p instanceof ServerboundSetCarriedItemPacket c) {
+            selectHotbar(c.getSlot());
+        } else if (p instanceof ServerboundAttackPacket a) {
+            attack(a.getEntityId());
+        } else if (p instanceof ServerboundSwingPacket) {
+            swing();
+        } else if (p instanceof ServerboundPlayerActionPacket a) {
+            playerAction(a);
+        } else if (p instanceof ServerboundUseItemOnPacket u) {
+            useItemOn(u);
+        } else if (p instanceof ServerboundPlayerInputPacket in) {
+            forward = in.isForward();
+            backward = in.isBackward();
+            left = in.isLeft();
+            right = in.isRight();
+            jumping = in.isJump();
+            sneaking = in.isShift();
+            sprinting = in.isSprint();
+        } else if (p instanceof ServerboundClientCommandPacket c) {
+            if (c.getRequest() == ClientCommand.PERFORM_RESPAWN) {
+                RespawnPacket r = new RespawnPacket();
+                r.setRuntimeEntityId(start.getRuntimeEntityId());
+                r.setState(RespawnPacket.State.CLIENT_READY);
+                r.setPosition(Vector3f.from(x, y + EYE_HEIGHT, z));
+                upstream.send(r);
+            }
         } else if (p instanceof ServerboundChatPacket c) {
             sendChat(c.getMessage());
         } else if (p instanceof ServerboundChatCommandPacket c) {
@@ -365,8 +462,39 @@ public final class Bridge implements BedrockUpstream.Listener {
         in.setAnalogMoveVector(Vector2f.ZERO);
         in.setInteractRotation(Vector2f.from(pitch, yaw));
         Set<PlayerAuthInputData> flags = new HashSet<>();
-        if (Math.abs(x - lastX) > 0.001 || Math.abs(z - lastZ) > 0.001) {
+        if (forward) {
             flags.add(PlayerAuthInputData.UP);
+        }
+        if (backward) {
+            flags.add(PlayerAuthInputData.DOWN);
+        }
+        if (left) {
+            flags.add(PlayerAuthInputData.LEFT);
+        }
+        if (right) {
+            flags.add(PlayerAuthInputData.RIGHT);
+        }
+        if (jumping) {
+            flags.add(PlayerAuthInputData.JUMPING);
+            flags.add(PlayerAuthInputData.WANT_UP);
+        }
+        if (sneaking) {
+            flags.add(PlayerAuthInputData.SNEAKING);
+        }
+        if (sprinting) {
+            flags.add(PlayerAuthInputData.SPRINTING);
+        }
+        synchronized (pendingActions) {
+            if (!pendingActions.isEmpty()) {
+                flags.add(PlayerAuthInputData.PERFORM_BLOCK_ACTIONS);
+                in.getPlayerActions().addAll(pendingActions);
+                pendingActions.clear();
+            }
+            if (pendingItemUse != null) {
+                flags.add(PlayerAuthInputData.PERFORM_ITEM_INTERACTION);
+                in.setItemUseTransaction(pendingItemUse);
+                pendingItemUse = null;
+            }
         }
         in.getInputData().addAll(flags);
         lastX = x;
@@ -392,6 +520,114 @@ public final class Bridge implements BedrockUpstream.Listener {
         c.setCommandOriginData(new CommandOriginData(CommandOriginType.PLAYER, java.util.UUID.randomUUID(), "", 0));
         c.setInternal(false);
         upstream.send(c);
+    }
+
+    // ---------------------------------------------------------------- gameplay actions
+
+    private void updateAttributes(UpdateAttributesPacket ua) {
+        for (AttributeData a : ua.getAttributes()) {
+            switch (a.getName()) {
+                case "minecraft:health" -> health = a.getValue();
+                case "minecraft:player.hunger" -> hunger = a.getValue();
+                case "minecraft:player.saturation" -> saturation = a.getValue();
+                default -> { }
+            }
+        }
+        if (javaPlaying) {
+            client.send(new ClientboundSetHealthPacket(health, (int) Math.ceil(hunger), saturation));
+        }
+    }
+
+    private void selectHotbar(int slot) {
+        inventory.setHeldSlot(slot);
+        MobEquipmentPacket m = new MobEquipmentPacket();
+        m.setRuntimeEntityId(start.getRuntimeEntityId());
+        m.setItem(inventory.held());
+        m.setInventorySlot(inventory.heldSlot());
+        m.setHotbarSlot(inventory.heldSlot());
+        m.setContainerId(0);
+        upstream.send(m);
+    }
+
+    private void swing() {
+        AnimatePacket a = new AnimatePacket();
+        a.setRuntimeEntityId(start.getRuntimeEntityId());
+        a.setAction(AnimatePacket.Action.SWING_ARM);
+        upstream.send(a);
+    }
+
+    private void attack(int javaEntityId) {
+        long runtime = entities.runtimeIdOf(javaEntityId);
+        if (runtime < 0) {
+            return;
+        }
+        InventoryTransactionPacket t = new InventoryTransactionPacket();
+        t.setTransactionType(InventoryTransactionType.ITEM_USE_ON_ENTITY);
+        t.setActionType(1); // attack
+        t.setRuntimeEntityId(runtime);
+        t.setHotbarSlot(inventory.heldSlot());
+        t.setItemInHand(inventory.held());
+        t.setPlayerPosition(Vector3f.from(x, y + EYE_HEIGHT, z));
+        t.setClickPosition(Vector3f.ZERO);
+        upstream.send(t);
+        swing();
+    }
+
+    private void playerAction(ServerboundPlayerActionPacket a) {
+        PlayerBlockActionData d = new PlayerBlockActionData();
+        d.setBlockPosition(a.getPosition());
+        d.setFace(a.getFace() == null ? 0 : a.getFace().ordinal());
+        boolean creative = start != null && start.getPlayerGameType() == org.cloudburstmc.protocol.bedrock.data.GameType.CREATIVE;
+        switch (a.getAction()) {
+            case START_DIGGING -> {
+                d.setAction(PlayerActionType.START_BREAK);
+                queue(d);
+                if (creative) {
+                    PlayerBlockActionData destroy = new PlayerBlockActionData();
+                    destroy.setAction(PlayerActionType.BLOCK_PREDICT_DESTROY);
+                    destroy.setBlockPosition(a.getPosition());
+                    destroy.setFace(d.getFace());
+                    queue(destroy);
+                }
+            }
+            case CANCEL_DIGGING -> {
+                d.setAction(PlayerActionType.ABORT_BREAK);
+                queue(d);
+            }
+            case FINISH_DIGGING -> {
+                d.setAction(PlayerActionType.BLOCK_PREDICT_DESTROY);
+                queue(d);
+            }
+            case DROP_ITEM, DROP_ITEM_STACK -> {
+                d.setAction(PlayerActionType.DROP_ITEM);
+                queue(d);
+            }
+            default -> { }
+        }
+    }
+
+    private void queue(PlayerBlockActionData d) {
+        synchronized (pendingActions) {
+            pendingActions.add(d);
+        }
+    }
+
+    private void useItemOn(ServerboundUseItemOnPacket u) {
+        ItemUseTransaction t = new ItemUseTransaction();
+        t.setActionType(0); // click block
+        t.setTriggerType(ItemUseTransaction.TriggerType.PLAYER_INPUT);
+        t.setClientInteractPrediction(ItemUseTransaction.PredictedResult.SUCCESS);
+        t.setBlockPosition(u.getPosition());
+        t.setBlockFace(u.getFace().ordinal());
+        t.setHotbarSlot(inventory.heldSlot());
+        t.setHand(HandSlot.MAINHAND);
+        t.setItemInHand(inventory.held());
+        t.setPlayerPosition(Vector3f.from(x, y + EYE_HEIGHT, z));
+        t.setClickPosition(Vector3f.from(u.getCursorX(), u.getCursorY(), u.getCursorZ()));
+        t.setBlockDefinition(() -> 0);
+        synchronized (pendingActions) {
+            pendingItemUse = t;
+        }
     }
 
     /** Replace every whole-word occurrence of {@code from} with {@code to} (case-insensitive). */

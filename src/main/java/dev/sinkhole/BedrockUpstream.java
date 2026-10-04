@@ -15,6 +15,11 @@ import org.cloudburstmc.protocol.bedrock.packet.ClientToServerHandshakePacket;
 import org.cloudburstmc.protocol.bedrock.packet.LoginPacket;
 import org.cloudburstmc.protocol.bedrock.packet.NetworkSettingsPacket;
 import org.cloudburstmc.protocol.bedrock.packet.RequestNetworkSettingsPacket;
+import org.cloudburstmc.protocol.bedrock.packet.StartGamePacket;
+import org.cloudburstmc.protocol.bedrock.data.definitions.BlockDefinition;
+import org.cloudburstmc.protocol.bedrock.data.definitions.ItemDefinition;
+import org.cloudburstmc.protocol.common.DefinitionRegistry;
+import org.cloudburstmc.protocol.common.SimpleDefinitionRegistry;
 import org.cloudburstmc.protocol.bedrock.packet.ResourcePackClientResponsePacket;
 import org.cloudburstmc.protocol.bedrock.packet.ResourcePackStackPacket;
 import org.cloudburstmc.protocol.bedrock.packet.ResourcePacksInfoPacket;
@@ -106,6 +111,29 @@ public final class BedrockUpstream implements BedrockPacketHandler {
         }
     }
 
+    private void setItemDefinitions(java.util.List<ItemDefinition> items) {
+        session.getPeer().getCodecHelper().setItemDefinitions(SimpleDefinitionRegistry.<ItemDefinition>builder().addAll(items).build());
+    }
+
+    /** Packets that carry items/blocks can only be decoded once the session knows the server's definitions. */
+    private void registerDefinitions(StartGamePacket sg) {
+        var helper = session.getPeer().getCodecHelper();
+        if (!sg.getItemDefinitions().isEmpty()) {
+            setItemDefinitions(sg.getItemDefinitions());
+        }
+        helper.setBlockDefinitions(new DefinitionRegistry<BlockDefinition>() {
+            @Override
+            public BlockDefinition getDefinition(int runtimeId) {
+                return () -> runtimeId;
+            }
+
+            @Override
+            public boolean isRegistered(BlockDefinition definition) {
+                return true;
+            }
+        });
+    }
+
     // ------------------------------------------------------------------ handshake
 
     @Override
@@ -116,6 +144,11 @@ public final class BedrockUpstream implements BedrockPacketHandler {
         if (packet instanceof NetworkSettingsPacket || packet instanceof ServerToClientHandshakePacket
                 || packet instanceof ResourcePacksInfoPacket || packet instanceof ResourcePackStackPacket) {
             return packet.handle(this); // the handle(...) methods below
+        }
+        if (packet instanceof StartGamePacket sg) {
+            registerDefinitions(sg);
+        } else if (packet instanceof org.cloudburstmc.protocol.bedrock.packet.ItemComponentPacket ic) {
+            setItemDefinitions(ic.getItems());
         }
         listener.onPacket(packet);
         return PacketSignal.HANDLED;

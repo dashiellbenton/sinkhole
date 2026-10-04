@@ -20,10 +20,12 @@ public final class JavaFrontend {
     private final AuthService auth;
     private final Registries registries;
     private final BedrockChunks chunks;
+    private final GameData gameData;
     private final AtomicReference<Bridge> active = new AtomicReference<>();
     private NetworkServer server;
 
-    public JavaFrontend(SinkholeConfig config, AuthService auth, Registries registries, BedrockChunks chunks) {
+    public JavaFrontend(SinkholeConfig config, AuthService auth, Registries registries, BedrockChunks chunks, GameData gameData) {
+        this.gameData = gameData;
         this.config = config;
         this.auth = auth;
         this.registries = registries;
@@ -52,7 +54,7 @@ public final class JavaFrontend {
     }
 
     private void onLogin(Session session) {
-        Bridge bridge = new Bridge(config, auth, registries, chunks, session);
+        Bridge bridge = new Bridge(config, auth, registries, chunks, gameData, session);
         if (!active.compareAndSet(null, bridge)) {
             session.disconnect("SinkholeMC only supports one player at a time.");
             return;
