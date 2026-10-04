@@ -2,7 +2,8 @@ package dev.sinkhole;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
-import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.MultiThreadIoEventLoopGroup;
+import io.netty.channel.nio.NioIoHandler;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import org.cloudburstmc.netty.channel.raknet.RakChannelFactory;
 import org.cloudburstmc.netty.channel.raknet.config.RakChannelOption;
@@ -51,7 +52,7 @@ public final class BedrockUpstream implements BedrockPacketHandler {
 
     private static final boolean DEBUG = System.getenv("SINKHOLE_DEBUG") != null;
 
-    private final NioEventLoopGroup group = new NioEventLoopGroup(1);
+    private final MultiThreadIoEventLoopGroup group = new MultiThreadIoEventLoopGroup(1, NioIoHandler.newFactory());
     private final AuthService.Identity identity;
     private final String host;
     private final int port;
@@ -120,6 +121,7 @@ public final class BedrockUpstream implements BedrockPacketHandler {
     }
 
     /** Packets that carry items/blocks can only be decoded once the session knows the server's definitions. */
+    @SuppressWarnings("deprecation") // StartGame still carries item definitions on older servers
     private void registerDefinitions(StartGamePacket sg) {
         var helper = session.getPeer().getCodecHelper();
         if (!sg.getItemDefinitions().isEmpty()) {
@@ -182,8 +184,8 @@ public final class BedrockUpstream implements BedrockPacketHandler {
             JsonWebSignature jws = new JsonWebSignature();
             jws.setCompactSerialization(packet.getJwt());
             PublicKey serverKey = EncryptionUtils.parseKey(jws.getHeader("x5u"));
-            byte[] salt = Base64.getDecoder().decode(new com.google.gson.JsonParser()
-                    .parse(jws.getUnverifiedPayload()).getAsJsonObject().get("salt").getAsString());
+            byte[] salt = Base64.getDecoder().decode(com.google.gson.JsonParser
+                    .parseString(jws.getUnverifiedPayload()).getAsJsonObject().get("salt").getAsString());
             SecretKey key = EncryptionUtils.getSecretKey(identity.key().getPrivate(), serverKey, salt);
             session.enableEncryption(key);
             session.sendPacketImmediately(new ClientToServerHandshakePacket());
@@ -198,6 +200,7 @@ public final class BedrockUpstream implements BedrockPacketHandler {
     private final java.util.Set<UUID> packsPending = new java.util.HashSet<>();
 
     @Override
+    @SuppressWarnings("deprecation")
     public PacketSignal handle(ResourcePacksInfoPacket packet) {
         java.util.List<String> wanted = new java.util.ArrayList<>();
         java.util.List<ResourcePacksInfoPacket.Entry> all = new java.util.ArrayList<>(packet.getResourcePackInfos());

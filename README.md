@@ -33,23 +33,29 @@ The Bedrock side speaks protocol 2193 (Bedrock 1.26.50).
 ## What works
 
 - Xbox device-code sign-in, config generation, quit-on-missing-config
-- Bedrock login/encryption handshake over RakNet (negative RakNet GUID, as real clients use)
-- Chunks and block updates (Bedrock -> Java blocks via GeyserMC's published mappings, checked at startup)
-- Position/rotation, sneak/sprint/jump input, chat, commands
-- Entities (players and mobs whose Bedrock name matches a Java entity type), health/food
-- Inventory/hotbar display and selection, attacking, swinging, block breaking and placing
-- Death/respawn request
+- Bedrock login/encryption handshake over RakNet (negative RakNet GUID, as real clients use) and resource-pack
+  download (packs are fetched and discarded so servers that require them accept the connection)
+- World: chunks (including the newer "request sub-chunks" mode), biomes, block updates, weather, time
+- Movement: position/rotation, sneak/sprint/jump/fly input, server corrections, knockback, dimension changes
+- Chat and commands, with the gamertag <-> Java name swap in both directions
+- Entities: players (tab list too), mobs whose Bedrock name matches a Java entity type, dropped items, names,
+  hurt/death animations
+- Health, food, experience, game mode, abilities, respawn
+- Inventory and hotbar, attacking, swinging, block breaking and placing
+- Chests, hoppers, dispensers/droppers, shulker boxes) and inventory clicks through Bedrock
+  item-stack requests
 
 ## Not done yet
 
-Biomes (all plains), block entities (chests/signs), item drops, entity metadata/equipment/effects,
-containers other than your own inventory, creative inventory, crafting, particles/sounds, weather and
-day/night, dimension changes, sub-chunk request mode, resource packs (the proxy claims to have them),
-skins (a plain skin is sent), Java versions other than 26.3. Expect rough edges.
+Block entities (sign text, banners, skulls), crafting tables/furnaces/anvils and other special screens (they are
+closed again), the crafting grid, creative inventory, entity equipment/effects/riding, particles and sounds,
+waterlogging, custom (data-driven) blocks and items, skins (a plain skin is used), NetherNet transport,
+Java versions other than 26.3. Expect rough edges.
 
 ## Testing status - please read
 
-Verified here with a headless Java client against:
+Build and unit tests: `mvn verify` (also run by the GitHub Actions workflow). Integration checks were done with a
+headless Java client against:
 - a small fake Bedrock server (in `src/test`) serving a flat world: join, chunks, entities, health,
   inventory, chat with name swap, attack/break actions
 - [Dragonfly](https://github.com/df-mc/dragonfly), an independent Bedrock server on the same protocol, with

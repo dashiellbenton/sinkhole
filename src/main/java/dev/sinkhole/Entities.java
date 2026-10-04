@@ -276,6 +276,7 @@ public final class Entities {
     }
 
     /** Tab list entries of other players. */
+    @SuppressWarnings("deprecation")
     public void playerList(PlayerListPacket p) {
         if (p.getAction() == PlayerListPacket.Action.ADD) {
             List<PlayerListEntry> entries = new java.util.ArrayList<>();

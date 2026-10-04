@@ -378,7 +378,7 @@ public final class Containers {
         boolean changed = false;
         for (ItemStackResponse r : p.getEntries()) {
             Runnable onFail = pendingFailure.remove(r.getRequestId());
-            if (!r.isSuccess()) {
+            if (r.getResult() != org.cloudburstmc.protocol.bedrock.data.inventory.itemstack.response.ItemStackResponseStatus.OK) {
                 if (onFail != null) {
                     onFail.run();
                 }
@@ -386,7 +386,7 @@ public final class Containers {
             }
             for (ItemStackResponseContainer c : r.getContainers()) {
                 for (ItemStackResponseSlot s : c.getItems()) {
-                    applySlot(c.getContainer(), s);
+                    applySlot(c.getContainerName().getContainer(), s);
                     changed = true;
                 }
             }

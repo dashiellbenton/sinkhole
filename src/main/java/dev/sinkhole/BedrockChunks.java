@@ -57,8 +57,8 @@ public final class BedrockChunks {
     public ChunkSection[] newSections(int count) {
         ChunkSection[] sections = new ChunkSection[count];
         for (int i = 0; i < count; i++) {
-            sections[i] = new ChunkSection(0, 0, DataPalette.createForBlockState(4, GLOBAL_BLOCK_BITS), DataPalette.createForBiome(1, GLOBAL_BIOME_BITS));
-            sections[i].getBiomeData().set(0, 0, 0, plainsBiome);
+            // the first argument is the default value: air for blocks, plains for biomes
+            sections[i] = new ChunkSection(0, 0, DataPalette.createForBlockState(0, GLOBAL_BLOCK_BITS), DataPalette.createForBiome(plainsBiome, GLOBAL_BIOME_BITS));
         }
         return sections;
     }
