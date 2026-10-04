@@ -25,6 +25,21 @@ final class NetherNetIdentity {
     private NetherNetIdentity() {
     }
 
+    /** The issuer a service token was signed by ("iss" claim, with a trailing slash), or the default one. */
+    static String domainOf(String token) {
+        try {
+            String payload = new String(Base64.getUrlDecoder().decode(token.split("\\.")[1]), java.nio.charset.StandardCharsets.UTF_8);
+            var iss = com.google.gson.JsonParser.parseString(payload).getAsJsonObject().get("iss");
+            if (iss != null && !iss.getAsString().isEmpty()) {
+                String d = iss.getAsString();
+                return d.endsWith("/") ? d : d + "/";
+            }
+        } catch (Exception ignored) {
+            // fall through
+        }
+        return DEFAULT_DOMAIN;
+    }
+
     /** @param token the service token, or null to use a self-signed one */
     static UnaryOperator<String> assertion(KeyPair key, String token, String domain) {
         return sdp -> {

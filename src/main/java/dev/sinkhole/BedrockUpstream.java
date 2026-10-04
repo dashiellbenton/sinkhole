@@ -117,7 +117,9 @@ public final class BedrockUpstream implements BedrockPacketHandler {
                     fail("The NetherNet connection closed: " + reason);
                 }
             });
-            java.util.function.UnaryOperator<String> assertion = NetherNetIdentity.assertion(identity.key(), identity.serviceToken(), NetherNetIdentity.DEFAULT_DOMAIN);
+            // Real accounts present their multiplayer token (bound to the login key); offline mode signs its own.
+            String nnToken = identity.loginToken() != null ? identity.loginToken() : identity.serviceToken();
+            java.util.function.UnaryOperator<String> assertion = NetherNetIdentity.assertion(identity.key(), nnToken, nnToken == null ? NetherNetIdentity.DEFAULT_DOMAIN : NetherNetIdentity.domainOf(nnToken));
             nether.connect(host, port, assertion);
 
             new io.netty.bootstrap.ServerBootstrap()

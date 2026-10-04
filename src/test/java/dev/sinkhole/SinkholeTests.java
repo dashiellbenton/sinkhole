@@ -164,4 +164,11 @@ class SinkholeTests {
         assertTrue(assertion.get("fingerprints").getAsString().contains(".."), "detached JWS");
         assertEquals(3, assertion.get("token").getAsString().split("\\.").length);
     }
+
+    @Test
+    void identityDomainComesFromTheTokenIssuer() {
+        String payload = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString("{\"iss\":\"https://example.test/auth\"}".getBytes());
+        assertEquals("https://example.test/auth/", NetherNetIdentity.domainOf("h." + payload + ".s"));
+        assertEquals(NetherNetIdentity.DEFAULT_DOMAIN, NetherNetIdentity.domainOf("garbage"));
+    }
 }
