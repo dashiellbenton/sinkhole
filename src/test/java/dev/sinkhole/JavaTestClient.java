@@ -24,7 +24,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.Serv
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerActionPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSetCarriedItemPacket;
-import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPunchPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemOnPacket;
 
 import java.net.InetSocketAddress;
@@ -86,7 +86,7 @@ public final class JavaTestClient {
         session.send(new ServerboundSetCarriedItemPacket(0));
         session.send(new ServerboundMovePlayerPosRotPacket(true, false, 8.5, -52, 8.5, 90f, 10f));
         session.send(new ServerboundAttackPacket(zombie[0]));
-        session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+        session.send(ServerboundPunchPacket.INSTANCE);
         session.send(new ServerboundPlayerActionPacket(PlayerAction.START_DIGGING, Vector3i.from(8, -53, 8), Direction.UP, 1));
         session.send(new ServerboundPlayerActionPacket(PlayerAction.FINISH_DIGGING, Vector3i.from(8, -53, 8), Direction.UP, 2));
         session.send(new ServerboundUseItemOnPacket(Vector3i.from(8, -53, 8), Direction.UP, Hand.MAIN_HAND, 0.5f, 1f, 0.5f, false, false, 3));

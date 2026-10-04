@@ -56,7 +56,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.Serv
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundPlayerInputPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundAttackPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerActionPacket;
-import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPunchPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemOnPacket;
 import org.geysermc.mcprotocollib.network.Session;
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
@@ -413,7 +413,7 @@ public final class Bridge implements BedrockUpstream.Listener {
             selectHotbar(c.getSlot());
         } else if (p instanceof ServerboundAttackPacket a) {
             attack(a.getEntityId());
-        } else if (p instanceof ServerboundSwingPacket) {
+        } else if (p instanceof ServerboundPunchPacket) {
             swing();
         } else if (p instanceof ServerboundPlayerActionPacket a) {
             playerAction(a);

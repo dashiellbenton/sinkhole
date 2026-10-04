@@ -22,12 +22,12 @@ java -jar target/SinkholeMC.jar
 2. `config.yml` is generated (`port` defaults to **35653**, `server` has no default) and SinkholeMC exits.
 3. Set `server:` to the Bedrock server (`host` or `host:port`, port defaults to 19132) and start it again.
    If `config.yml` or `server` is missing, SinkholeMC prints a message and quits.
-4. In Minecraft **Java Edition 26.2**, add a server `localhost:35653` and join.
+4. In Minecraft **Java Edition 26.3**, add a server `localhost:35653` and join.
 
 One player at a time; a second connection is refused. The Xbox gamertag the Bedrock server sees is swapped
 for the Java username you joined with, in chat, commands and player names (both directions).
 
-Requirements: Java 21+. The Java client must be exactly **26.2** (the Java protocol version is not translated).
+Requirements: Java 21+. The Java client must be exactly **26.3** (the Java protocol version is not translated).
 The Bedrock side speaks protocol 2193 (Bedrock 1.26.50).
 
 ## What works
@@ -45,7 +45,7 @@ The Bedrock side speaks protocol 2193 (Bedrock 1.26.50).
 Biomes (all plains), block entities (chests/signs), item drops, entity metadata/equipment/effects,
 containers other than your own inventory, creative inventory, crafting, particles/sounds, weather and
 day/night, dimension changes, sub-chunk request mode, resource packs (the proxy claims to have them),
-skins (a plain skin is sent), Java versions other than 26.2. Expect rough edges.
+skins (a plain skin is sent), Java versions other than 26.3. Expect rough edges.
 
 ## Testing status - please read
 
@@ -63,4 +63,6 @@ public servers. The first run against a real server may need fixes.
 Developer flag for testing against servers with authentication disabled: `--offline <gamertag>`.
 `SINKHOLE_DEBUG=1` prints packet-level logs.
 
-Data files under `src/main/resources/data` come from GeyserMC's mappings (MIT); see `data/NOTICE`.
+Data files under `src/main/resources/data` come from GeyserMC's mappings (MIT; the `feature/26.3` branch of
+`GeyserMC/mappings`, Java 26.3 / Bedrock 1.26.50); see `data/NOTICE`. `tools/build_block_map.py` regenerates
+`block_map.txt` when the mappings change.

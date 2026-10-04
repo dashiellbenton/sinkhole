@@ -17,7 +17,7 @@ import java.util.List;
 
 /** Turns a Bedrock level chunk (sub-chunk list) into a Java level-chunk packet. */
 public final class BedrockChunks {
-    private static final int GLOBAL_BLOCK_BITS = 15;
+    private static final int GLOBAL_BLOCK_BITS = 16;
     private static final int GLOBAL_BIOME_BITS = 7;
 
     private final BlockMapper blocks;
