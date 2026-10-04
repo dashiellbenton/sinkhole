@@ -80,7 +80,7 @@ public final class JavaTestClient {
             }
         });
         session.connect();
-        Thread.sleep(4000);
+        Thread.sleep(Long.getLong("sinkhole.wait", 4000L));
         session.send(new ServerboundChatPacket("hello from " + name + " (I am JavaDude)", System.currentTimeMillis(), 0L, null, 0, new java.util.BitSet(), 0));
         session.send(new ServerboundChatCommandPacket("time query daytime"));
         session.send(new ServerboundSetCarriedItemPacket(0));

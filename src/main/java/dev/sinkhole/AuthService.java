@@ -99,7 +99,7 @@ public final class AuthService {
             String jwt = Jwts.sign(kp, pub, "{\"identityPublicKey\":\"" + pub + "\",\"iss\":\"self\",\"randomNonce\":" + System.nanoTime()
                     + ",\"iat\":" + now + ",\"nbf\":" + (now - 60) + ",\"exp\":" + (now + 86400)
                     + ",\"extraData\":{\"displayName\":\"" + offlineName + "\",\"identity\":\"" + uuid + "\",\"XUID\":\"0\",\"titleId\":\"896928775\"}}");
-            return new Identity(offlineName, "", uuid, List.of(jwt), AuthType.SELF_SIGNED, kp);
+            return new Identity(offlineName, "0", uuid, List.of(jwt), AuthType.SELF_SIGNED, kp);
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }

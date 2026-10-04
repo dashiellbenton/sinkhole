@@ -8,18 +8,24 @@ import org.cloudburstmc.protocol.bedrock.codec.BedrockPacketSerializer;
 import org.cloudburstmc.protocol.bedrock.codec.v2193.Bedrock_v2193;
 import org.cloudburstmc.protocol.bedrock.data.definitions.SimpleItemDefinition;
 import org.cloudburstmc.protocol.bedrock.data.inventory.ItemVersion;
-import org.cloudburstmc.protocol.bedrock.packet.ItemComponentPacket;
+import org.cloudburstmc.protocol.bedrock.codec.BedrockPacketDefinition;
+import org.cloudburstmc.protocol.bedrock.data.PacketRecipient;
+import org.cloudburstmc.protocol.bedrock.packet.*;
+import java.util.Set;
 import org.cloudburstmc.protocol.common.util.VarInts;
 
 /** The Bedrock protocol version we speak. SINKHOLE_CODEC=<protocol number> selects an older one for testing. */
 public final class BedrockCodecs {
-    private static final BedrockCodec CURRENT;
-
     private BedrockCodecs() {
     }
 
+    /** Built on first use, after all the static serializers above exist. */
+    private static final class Holder {
+        static final BedrockCodec CODEC = select();
+    }
+
     public static BedrockCodec current() {
-        return CURRENT;
+        return Holder.CODEC;
     }
 
     /**
@@ -51,13 +57,50 @@ public final class BedrockCodecs {
         }
     };
 
-    static {
-        CURRENT = select();
-    }
+    /** Packets Sinkhole actually translates (or needs for the handshake). Everything else is not decoded at all. */
+    private static final Set<Class<? extends BedrockPacket>> NEEDED = Set.of(
+            NetworkSettingsPacket.class, ServerToClientHandshakePacket.class, ResourcePacksInfoPacket.class,
+            ResourcePackStackPacket.class, DisconnectPacket.class, PlayStatusPacket.class, StartGamePacket.class,
+            ItemComponentPacket.class, ChunkRadiusUpdatedPacket.class, NetworkChunkPublisherUpdatePacket.class,
+            LevelChunkPacket.class, UpdateBlockPacket.class, MovePlayerPacket.class, TextPacket.class,
+            AddPlayerPacket.class, AddEntityPacket.class, RemoveEntityPacket.class, MoveEntityAbsolutePacket.class,
+            MoveEntityDeltaPacket.class, UpdateAttributesPacket.class, InventoryContentPacket.class,
+            InventorySlotPacket.class, SetTimePacket.class,
+            // serverbound: what we send must still be encodable
+            RequestNetworkSettingsPacket.class, LoginPacket.class, ClientToServerHandshakePacket.class,
+            ResourcePackClientResponsePacket.class, ClientCacheStatusPacket.class, RequestChunkRadiusPacket.class,
+            SetLocalPlayerAsInitializedPacket.class, PlayerAuthInputPacket.class,
+            CommandRequestPacket.class, MobEquipmentPacket.class, InventoryTransactionPacket.class,
+            AnimatePacket.class, RespawnPacket.class);
 
+    /** Consumes a packet's bytes without parsing them, so unexpected/changed packets cannot break the connection. */
+    private static final BedrockPacketSerializer<BedrockPacket> IGNORE = new BedrockPacketSerializer<>() {
+        @Override
+        public void serialize(ByteBuf buffer, BedrockCodecHelper helper, BedrockPacket packet) {
+        }
+
+        @Override
+        public void deserialize(ByteBuf buffer, BedrockCodecHelper helper, BedrockPacket packet) {
+            buffer.skipBytes(buffer.readableBytes());
+        }
+    };
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private static BedrockCodec select() {
         BedrockCodec base = base();
-        return base.toBuilder().updateSerializer(ItemComponentPacket.class, WIDE_ITEM_COMPONENTS).build();
+        BedrockCodec.Builder builder = base.toBuilder().updateSerializer(ItemComponentPacket.class, WIDE_ITEM_COMPONENTS);
+        for (int id = 0; id < 512; id++) {
+            BedrockPacketDefinition<?> def = base.getPacketDefinition(id);
+            if (def == null) {
+                continue;
+            }
+            Class<? extends BedrockPacket> type = def.getFactory().get().getClass();
+            // clientbound-only packets we don't translate are skipped; serverbound ones keep their serializer
+            if (!NEEDED.contains(type) && def.getRecipient() != PacketRecipient.SERVER) {
+                builder.updateSerializer((Class) type, (BedrockPacketSerializer) IGNORE);
+            }
+        }
+        return builder.build();
     }
 
     private static BedrockCodec base() {

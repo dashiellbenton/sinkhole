@@ -131,13 +131,13 @@ public final class Bridge implements BedrockUpstream.Listener {
     private boolean sentInitialized;
 
     private String gamertag;
+    private String xuid = "";
     private Entities entities;
     private Inventory inventory;
 
     // Player state mirrored from Bedrock attributes
     private float health = 20, hunger = 20, saturation = 5;
     private final List<PlayerBlockActionData> pendingActions = new ArrayList<>();
-    private ItemUseTransaction pendingItemUse;
     private boolean sneaking, sprinting, jumping, forward, backward, left, right;
 
     public Bridge(SinkholeConfig config, AuthService auth, Registries registries, BedrockChunks chunks, GameData gameData, Session client) {
@@ -185,6 +185,7 @@ public final class Bridge implements BedrockUpstream.Listener {
         try {
             AuthService.Identity id = auth.identity();
             gamertag = id.gamertag();
+            xuid = id.xuid() == null ? "" : id.xuid();
             entities = new Entities(client, gamertag, javaName);
             inventory = new Inventory(gameData);
             upstream = new BedrockUpstream(id, config.serverHost(), config.serverPort(), this);
@@ -387,6 +388,13 @@ public final class Bridge implements BedrockUpstream.Listener {
     // ---------------------------------------------------------------- Java -> Bedrock
 
     private void onJavaPacket(Packet p) {
+        if (start == null || inventory == null || entities == null) {
+            // Not in the Bedrock world yet; only the configuration acknowledgement matters.
+            if (p instanceof ServerboundFinishConfigurationPacket) {
+                javaConfigured = true;
+            }
+            return;
+        }
         if (DEBUG) {
             System.out.println("[debug] java client -> proxy: " + p.getClass().getSimpleName());
         }
@@ -490,11 +498,6 @@ public final class Bridge implements BedrockUpstream.Listener {
                 in.getPlayerActions().addAll(pendingActions);
                 pendingActions.clear();
             }
-            if (pendingItemUse != null) {
-                flags.add(PlayerAuthInputData.PERFORM_ITEM_INTERACTION);
-                in.setItemUseTransaction(pendingItemUse);
-                pendingItemUse = null;
-            }
         }
         in.getInputData().addAll(flags);
         lastX = x;
@@ -508,7 +511,7 @@ public final class Bridge implements BedrockUpstream.Listener {
         t.setType(TextPacket.Type.CHAT);
         t.setNeedsTranslation(false);
         t.setSourceName(gamertag);
-        t.setXuid("");
+        t.setXuid(xuid);
         t.setPlatformChatId("");
         t.setMessage(rename(message, javaName, gamertag));
         upstream.send(t);
@@ -613,21 +616,19 @@ public final class Bridge implements BedrockUpstream.Listener {
     }
 
     private void useItemOn(ServerboundUseItemOnPacket u) {
-        ItemUseTransaction t = new ItemUseTransaction();
+        InventoryTransactionPacket t = new InventoryTransactionPacket();
+        t.setTransactionType(InventoryTransactionType.ITEM_USE);
         t.setActionType(0); // click block
         t.setTriggerType(ItemUseTransaction.TriggerType.PLAYER_INPUT);
         t.setClientInteractPrediction(ItemUseTransaction.PredictedResult.SUCCESS);
         t.setBlockPosition(u.getPosition());
         t.setBlockFace(u.getFace().ordinal());
         t.setHotbarSlot(inventory.heldSlot());
-        t.setHand(HandSlot.MAINHAND);
         t.setItemInHand(inventory.held());
         t.setPlayerPosition(Vector3f.from(x, y + EYE_HEIGHT, z));
         t.setClickPosition(Vector3f.from(u.getCursorX(), u.getCursorY(), u.getCursorZ()));
         t.setBlockDefinition(() -> 0);
-        synchronized (pendingActions) {
-            pendingItemUse = t;
-        }
+        upstream.send(t);
     }
 
     /** Replace every whole-word occurrence of {@code from} with {@code to} (case-insensitive). */

@@ -67,7 +67,7 @@ public final class BedrockUpstream implements BedrockPacketHandler {
                 .channelFactory(RakChannelFactory.client(NioDatagramChannel.class))
                 .group(group)
                 .option(RakChannelOption.RAK_PROTOCOL_VERSION, 11)
-                .option(RakChannelOption.RAK_GUID, System.nanoTime())
+                .option(RakChannelOption.RAK_GUID, -(Math.abs(new java.util.Random().nextLong() >> 1) + 1)) // real clients use negative GUIDs; some servers insist
                 .handler(new BedrockClientInitializer() {
                     @Override
                     protected void initSession(BedrockClientSession s) {
@@ -83,7 +83,7 @@ public final class BedrockUpstream implements BedrockPacketHandler {
                 .connect(new InetSocketAddress(host, port))
                 .addListener(f -> {
                     if (!f.isSuccess()) {
-                        fail("Could not reach the Bedrock server " + host + ":" + port + " (" + f.cause().getMessage() + ")");
+                        fail("Could not reach the Bedrock server " + host + ":" + port + " (" + f.cause() + ")");
                     }
                 });
     }
